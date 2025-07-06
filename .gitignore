@@ -1,22 +1,72 @@
-# Ambiente virtual
-.venv/
-venv/
-env/
+# Arquivos de ambiente
+.env
+.env.local
+.env.production
 
-# Dados do projeto
+# Arquivos de dados locais
 dados_operacao.json
-backup_dados_*.json
-*.xlsx
-*.csv
+*.json.backup
+backup_*.json
 
 # Cache do Python
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Logs
+*.log
+logs/
+
+# Arquivos temporários
+*.tmp
+*.temp
+.DS_Store
+Thumbs.db
+
+# Arquivos de upload
+uploads/
+temp/
+
+# Arquivos de teste
+test_*.py
+*_test.py
+
+# Dados do projeto
+*.xlsx
+*.csv
 
 # Distribuição / empacotamento
-.Python
 build/
 develop-eggs/
 dist/
@@ -40,17 +90,6 @@ wheels/
 # Logs
 *.log
 logs/
-
-# IDEs
-.vscode/
-.idea/
-*.swp
-*.swo
-*~
-
-# Sistema operacional
-.DS_Store
-Thumbs.db
 
 # Streamlit
 .streamlit/
