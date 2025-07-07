@@ -195,9 +195,14 @@ st.markdown(f"""
 def load_data():
     try:
         dados = carregar_dados_operacao()
+        if dados is None:
+            return []
         return dados
     except Exception as e:
-        show_temp_message(f"Erro na função load_data: {e}", "error", 15)
+        st.error(f"Erro na função load_data: {e}")
+        st.error(f"Tipo do erro: {type(e).__name__}")
+        import traceback
+        st.code(traceback.format_exc())
         return []
 
 # Função para recarregar dados (força atualização)
@@ -205,9 +210,14 @@ def reload_data():
     try:
         st.cache_data.clear()
         dados = carregar_dados_operacao()
+        if dados is None:
+            return []
         return dados
     except Exception as e:
-        show_temp_message(f"Erro na função reload_data: {e}", "error", 15)
+        st.error(f"Erro na função reload_data: {e}")
+        st.error(f"Tipo do erro: {type(e).__name__}")
+        import traceback
+        st.code(traceback.format_exc())
         return []
 
 # Função para salvar dados (com integração ao banco)

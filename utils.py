@@ -263,6 +263,8 @@ def carregar_dados_operacao() -> list:
     """
     Carrega dados de operação do banco de dados ou arquivo local
     """
+    import time  # Importar time no início da função
+    
     try:
         # Tentar carregar do Supabase primeiro
         if db_manager.is_connected():
@@ -274,7 +276,6 @@ def carregar_dados_operacao() -> list:
             if dados_supabase:
                 status_placeholder.success(f"✅ Carregados {len(dados_supabase)} registros do Supabase")
                 # Limpar a mensagem após 5 segundos
-                import time
                 time.sleep(5)
                 status_placeholder.empty()
                 return dados_supabase
@@ -305,21 +306,14 @@ def carregar_dados_operacao() -> list:
             return []
         
     except Exception as e:
-        status_placeholder = st.empty()
-        status_placeholder.error(f"❌ Erro ao carregar dados: {e}")
-        status_placeholder.error(f"Tipo do erro: {type(e).__name__}")
-        # Em caso de erro, tentar criar arquivo vazio
+        # Em caso de erro, tentar criar arquivo vazio sem usar placeholders
         try:
             with open(DADOS['arquivo_saida'], 'w', encoding='utf-8') as f:
                 json.dump([], f, ensure_ascii=False, indent=2)
-            status_placeholder.info("✅ Arquivo local criado após erro")
-            time.sleep(3)
-            status_placeholder.empty()
+            st.info("✅ Arquivo local criado após erro")
             return []
         except Exception as e2:
-            status_placeholder.error(f"❌ Erro ao criar arquivo local: {e2}")
-            time.sleep(5)
-            status_placeholder.empty()
+            st.error(f"❌ Erro ao criar arquivo local: {e2}")
             return []
 
 def salvar_dados_validacao(df: pd.DataFrame, arquivo_origem: str = None) -> bool:

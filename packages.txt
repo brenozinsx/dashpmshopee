@@ -1,0 +1,14 @@
+# Dependências do sistema para o Streamlit Cloud
+# Este arquivo é usado para instalar pacotes do sistema operacional
+
+# Para suporte a Excel e outros formatos
+libgomp1
+libglib2.0-0
+libsm6
+libxext6
+libxrender-dev
+libgomp1
+libglib2.0-0
+libsm6
+libxext6
+libxrender-dev 
