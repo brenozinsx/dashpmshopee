@@ -4,7 +4,14 @@ from datetime import datetime
 import json
 import os
 from config import DADOS, MENSAGENS
-from database import db_manager
+
+# Importação condicional do database para evitar erros
+try:
+    from database import db_manager
+    DB_AVAILABLE = True
+except ImportError:
+    DB_AVAILABLE = False
+    st.warning("⚠️ Módulo database não disponível. Usando apenas armazenamento local.")
 
 def processar_upload_planilha(uploaded_file):
     """
@@ -235,7 +242,7 @@ def salvar_dados_operacao(dados: list) -> bool:
             backup_dados(dados)
         
         # Salvar no Supabase se conectado
-        if db_manager.is_connected():
+        if DB_AVAILABLE and db_manager.is_connected():
             st.info("🌐 Tentando salvar no Supabase...")
             success = db_manager.save_dados_operacao(dados)
             if success:
@@ -267,7 +274,7 @@ def carregar_dados_operacao() -> list:
     
     try:
         # Tentar carregar do Supabase primeiro
-        if db_manager.is_connected():
+        if DB_AVAILABLE and db_manager.is_connected():
             # Usar st.empty() para criar um placeholder que será limpo
             status_placeholder = st.empty()
             status_placeholder.info("🔄 Tentando carregar dados do Supabase...")
@@ -321,7 +328,7 @@ def salvar_dados_validacao(df: pd.DataFrame, arquivo_origem: str = None) -> bool
     Salva dados de validação no banco de dados
     """
     try:
-        if db_manager.is_connected():
+        if DB_AVAILABLE and db_manager.is_connected():
             success = db_manager.save_dados_validacao(df, arquivo_origem)
             if success:
                 st.success("✅ Dados de validação salvos no banco!")
@@ -339,7 +346,7 @@ def carregar_dados_validacao(limit: int = 1000) -> pd.DataFrame:
     Carrega dados de validação do banco de dados
     """
     try:
-        if db_manager.is_connected():
+        if DB_AVAILABLE and db_manager.is_connected():
             return db_manager.load_dados_validacao(limit)
         else:
             st.warning("⚠️ Supabase não conectado. Carregando dados locais.")
@@ -354,7 +361,7 @@ def salvar_flutuantes_operador(flutuantes_data: dict, data_operacao: str) -> boo
     Salva dados de flutuantes por operador no banco
     """
     try:
-        if db_manager.is_connected():
+        if DB_AVAILABLE and db_manager.is_connected():
             success = db_manager.save_flutuantes_operador(flutuantes_data, data_operacao)
             if success:
                 st.success("✅ Flutuantes por operador salvos no banco!")
@@ -372,7 +379,7 @@ def carregar_flutuantes_operador(data_operacao: str = None) -> dict:
     Carrega dados de flutuantes por operador do banco
     """
     try:
-        if db_manager.is_connected():
+        if DB_AVAILABLE and db_manager.is_connected():
             return db_manager.load_flutuantes_operador(data_operacao)
         else:
             st.warning("⚠️ Supabase não conectado.")
@@ -387,7 +394,7 @@ def sincronizar_dados_locais(dados_locais: list) -> bool:
     Sincroniza dados locais com o Supabase
     """
     try:
-        if db_manager.is_connected():
+        if DB_AVAILABLE and db_manager.is_connected():
             return db_manager.sync_local_to_supabase(dados_locais)
         else:
             st.warning("⚠️ Supabase não conectado. Sincronização não possível.")
@@ -402,7 +409,7 @@ def obter_estatisticas_banco() -> dict:
     Obtém estatísticas do banco de dados
     """
     try:
-        if db_manager.is_connected():
+        if DB_AVAILABLE and db_manager.is_connected():
             return db_manager.get_estatisticas()
         else:
             return {}
