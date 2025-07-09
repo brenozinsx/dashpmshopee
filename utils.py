@@ -416,4 +416,343 @@ def obter_estatisticas_banco() -> dict:
             
     except Exception as e:
         st.error(f"❌ Erro ao obter estatísticas: {e}")
-        return {} 
+        return {}
+
+# ============================================================================
+# FUNÇÕES PARA PACOTES FLUTUANTES
+# ============================================================================
+
+def processar_csv_flutuantes(uploaded_file):
+    """
+    Processa upload de CSV de pacotes flutuantes e retorna dados formatados
+    """
+    try:
+        if uploaded_file.name.endswith('.csv'):
+            df = pd.read_csv(uploaded_file)
+        else:
+            st.error("Formato de arquivo não suportado. Use .csv")
+            return None
+        
+        # Verificar colunas obrigatórias
+        colunas_obrigatorias = [
+            'Estacao', 'Semana', 'Data de Recebimento', 'Destino', 'Aging',
+            'Tracking Number', 'Foi Expedido', 'Operador', 'Status SPX',
+            'Status', 'Foi encontrado', 'Descricao do item', 'Operador Real'
+        ]
+        
+        colunas_faltantes = [col for col in colunas_obrigatorias if col not in df.columns]
+        if colunas_faltantes:
+            st.error(f"Colunas obrigatórias não encontradas: {', '.join(colunas_faltantes)}")
+            st.info("Colunas esperadas: " + ", ".join(colunas_obrigatorias))
+            return None
+        
+        # Limpar e processar dados
+        df = df.dropna(subset=['Operador Real'])  # Remover linhas sem operador real
+        df = df[df['Operador Real'].str.strip() != '']  # Remover operadores vazios
+        
+        # Processar campo "Foi Expedido"
+        if 'Foi Expedido' in df.columns:
+            df['foi_expedido'] = df['Foi Expedido'].astype(str).str.strip()
+            # Mapear valores específicos do CSV
+            mapeamento_expedido = {
+                'Pacote Flutuante': False,
+                'Pacote Revertido': True,
+                'Sim': True,
+                'sim': True,
+                'S': True,
+                's': True,
+                'Yes': True,
+                'yes': True,
+                'Y': True,
+                'y': True,
+                '1': True,
+                'TRUE': True,
+                'True': True,
+                'true': True,
+                'Não': False,
+                'Nao': False,
+                'nao': False,
+                'não': False,
+                'N': False,
+                'n': False,
+                'No': False,
+                'no': False,
+                '0': False,
+                'FALSE': False,
+                'False': False,
+                'false': False
+            }
+            df['foi_expedido'] = df['foi_expedido'].map(mapeamento_expedido).fillna(False)
+            # Remover coluna original
+            df = df.drop('Foi Expedido', axis=1)
+        
+        # Processar campo "Foi encontrado" - este é o campo principal para determinar se foi encontrado
+        if 'Foi encontrado' in df.columns:
+            st.write("🔍 DEBUG: Processando campo 'Foi encontrado'")
+            st.write(f"Valores únicos originais: {df['Foi encontrado'].unique()}")
+            
+            df['foi_encontrado'] = df['Foi encontrado'].astype(str).str.strip()
+            st.write(f"Valores únicos após conversão: {df['foi_encontrado'].unique()}")
+            
+            # Mapear valores específicos do CSV
+            mapeamento_encontrado = {
+                'Sim': True,
+                'sim': True,
+                'S': True,
+                's': True,
+                'Yes': True,
+                'yes': True,
+                'Y': True,
+                'y': True,
+                '1': True,
+                'TRUE': True,
+                'True': True,
+                'true': True,
+                'Não': False,
+                'Nao': False,
+                'nao': False,
+                'não': False,
+                'N': False,
+                'n': False,
+                'No': False,
+                'no': False,
+                '0': False,
+                'FALSE': False,
+                'False': False,
+                'false': False
+            }
+            
+            # Mostrar mapeamento aplicado
+            for valor in df['foi_encontrado'].unique():
+                if valor in mapeamento_encontrado:
+                    st.write(f"Mapeamento: '{valor}' -> {mapeamento_encontrado[valor]}")
+                else:
+                    st.write(f"⚠️ Valor não mapeado: '{valor}'")
+            
+            df['foi_encontrado'] = df['foi_encontrado'].map(mapeamento_encontrado).fillna(False)
+            
+            st.write(f"Resultado final - True: {(df['foi_encontrado'] == True).sum()}, False: {(df['foi_encontrado'] == False).sum()}")
+            
+            # Remover coluna original
+            df = df.drop('Foi encontrado', axis=1)
+        
+        # Processar campo "Status" - manter como backup mas não usar para cálculo
+        if 'Status' in df.columns:
+            df['status'] = df['Status'].astype(str).str.strip()
+            # Mapear valores específicos do CSV
+            mapeamento_status = {
+                'TRUE': True,
+                'True': True,
+                'true': True,
+                'Sim': True,
+                'sim': True,
+                'S': True,
+                's': True,
+                'Yes': True,
+                'yes': True,
+                'Y': True,
+                'y': True,
+                '1': True,
+                'FALSE': False,
+                'False': False,
+                'false': False,
+                'Não': False,
+                'Nao': False,
+                'nao': False,
+                'não': False,
+                'N': False,
+                'n': False,
+                'No': False,
+                'no': False,
+                '0': False
+            }
+            df['status'] = df['status'].map(mapeamento_status).fillna(False)
+            # Remover coluna original
+            df = df.drop('Status', axis=1)
+        
+        # Processar campo "Destino" - preencher vazios
+        if 'Destino' in df.columns:
+            df['Destino'] = df['Destino'].fillna('Não informado')
+        
+        # Processar campo "Aging" - garantir que seja numérico
+        if 'Aging' in df.columns:
+            df['Aging'] = pd.to_numeric(df['Aging'], errors='coerce').fillna(0).astype(int)
+        
+        if df.empty:
+            st.error("Nenhum dado válido encontrado após limpeza")
+            return None
+        
+        st.success(f"✅ CSV processado com sucesso! {len(df)} registros válidos encontrados")
+        return df
+        
+    except Exception as e:
+        st.error(f"Erro ao processar arquivo CSV: {e}")
+        return None
+
+def salvar_pacotes_flutuantes(df: pd.DataFrame, arquivo_origem: str = None, upsert: bool = True) -> bool:
+    """
+    Salva dados de pacotes flutuantes no banco de dados com opção de upsert
+    """
+    try:
+        if DB_AVAILABLE and db_manager.is_connected():
+            success = db_manager.save_pacotes_flutuantes(df, arquivo_origem, upsert)
+            if success:
+                if upsert:
+                    st.success("✅ Pacotes flutuantes processados no banco (modo upsert)!")
+                else:
+                    st.success("✅ Pacotes flutuantes salvos no banco!")
+            return success
+        else:
+            st.warning("⚠️ Supabase não conectado. Dados não salvos no banco.")
+            return False
+            
+    except Exception as e:
+        st.error(f"❌ Erro ao salvar pacotes flutuantes: {e}")
+        return False
+
+def carregar_pacotes_flutuantes(limit: int = 1000, operador_real: str = None, data_inicio: str = None, data_fim: str = None) -> pd.DataFrame:
+    """
+    Carrega dados de pacotes flutuantes do banco de dados
+    """
+    try:
+        if DB_AVAILABLE and db_manager.is_connected():
+            return db_manager.load_pacotes_flutuantes(limit, operador_real, data_inicio, data_fim)
+        else:
+            st.warning("⚠️ Supabase não conectado.")
+            return pd.DataFrame()
+            
+    except Exception as e:
+        st.error(f"❌ Erro ao carregar pacotes flutuantes: {e}")
+        return pd.DataFrame()
+
+def obter_ranking_operadores_flutuantes() -> pd.DataFrame:
+    """
+    Obtém ranking de operadores com mais flutuantes
+    """
+    try:
+        if DB_AVAILABLE and db_manager.is_connected():
+            return db_manager.get_ranking_operadores_flutuantes()
+        else:
+            st.warning("⚠️ Supabase não conectado.")
+            return pd.DataFrame()
+            
+    except Exception as e:
+        st.error(f"❌ Erro ao obter ranking de operadores: {e}")
+        return pd.DataFrame()
+
+def obter_resumo_flutuantes_estacao() -> pd.DataFrame:
+    """
+    Obtém resumo de flutuantes por estação
+    """
+    try:
+        if DB_AVAILABLE and db_manager.is_connected():
+            return db_manager.get_resumo_flutuantes_estacao()
+        else:
+            st.warning("⚠️ Supabase não conectado.")
+            return pd.DataFrame()
+            
+    except Exception as e:
+        st.error(f"❌ Erro ao obter resumo por estação: {e}")
+        return pd.DataFrame()
+
+def obter_total_flutuantes_por_data(data_operacao: str) -> int:
+    """
+    Obtém total de flutuantes para uma data específica
+    """
+    try:
+        if DB_AVAILABLE and db_manager.is_connected():
+            return db_manager.get_total_flutuantes_por_data(data_operacao)
+        else:
+            return 0
+            
+    except Exception as e:
+        st.error(f"❌ Erro ao obter total de flutuantes: {e}")
+        return 0
+
+def exportar_flutuantes_excel(df: pd.DataFrame, nome_arquivo: str = "relatorio_flutuantes.xlsx"):
+    """
+    Exporta dados de flutuantes para arquivo Excel
+    """
+    try:
+        # Criar cópia para não modificar o original
+        df_export = df.copy()
+        
+        # Formatar colunas de data
+        if 'data_recebimento' in df_export.columns:
+            df_export['data_recebimento'] = pd.to_datetime(df_export['data_recebimento']).dt.strftime('%d/%m/%Y')
+        
+        if 'importado_em' in df_export.columns:
+            df_export['importado_em'] = pd.to_datetime(df_export['importado_em']).dt.strftime('%d/%m/%Y %H:%M')
+        
+        # Renomear colunas para português
+        mapeamento_colunas = {
+            'estacao': 'Estação',
+            'semana': 'Semana',
+            'data_recebimento': 'Data de Recebimento',
+            'destino': 'Destino',
+            'aging': 'Aging',
+            'tracking_number': 'Tracking Number',
+            'foi_expedido': 'Foi Expedido',
+            'operador': 'Operador',
+            'status_spx': 'Status SPX',
+            'status': 'Status',
+            'foi_encontrado': 'Foi Encontrado',
+            'descricao_item': 'Descrição do Item',
+            'operador_real': 'Operador Real',
+            'importado_em': 'Importado em',
+            'arquivo_origem': 'Arquivo de Origem'
+        }
+        
+        df_export = df_export.rename(columns=mapeamento_colunas)
+        
+        # Salvar Excel
+        with pd.ExcelWriter(nome_arquivo, engine='xlsxwriter') as writer:
+            df_export.to_excel(writer, sheet_name='Pacotes Flutuantes', index=False)
+            
+            # Formatação
+            workbook = writer.book
+            worksheet = writer.sheets['Pacotes Flutuantes']
+            
+            # Formatos
+            formato_header = workbook.add_format({
+                'bold': True,
+                'bg_color': '#EE4D2D',
+                'font_color': 'white',
+                'border': 1
+            })
+            
+            formato_data = workbook.add_format({
+                'num_format': 'dd/mm/yyyy',
+                'border': 1
+            })
+            
+            formato_texto = workbook.add_format({
+                'border': 1
+            })
+            
+            # Aplicar formatos
+            for col_num, value in enumerate(df_export.columns.values):
+                worksheet.write(0, col_num, value, formato_header)
+            
+            # Formatar colunas específicas
+            worksheet.set_column('A:A', 15, formato_texto)  # Estação
+            worksheet.set_column('B:B', 10, formato_texto)  # Semana
+            worksheet.set_column('C:C', 15, formato_data)   # Data de Recebimento
+            worksheet.set_column('D:D', 15, formato_texto)  # Destino
+            worksheet.set_column('E:E', 8, formato_texto)   # Aging
+            worksheet.set_column('F:F', 20, formato_texto)  # Tracking Number
+            worksheet.set_column('G:G', 12, formato_texto)  # Foi Expedido
+            worksheet.set_column('H:H', 15, formato_texto)  # Operador
+            worksheet.set_column('I:I', 15, formato_texto)  # Status SPX
+            worksheet.set_column('J:J', 15, formato_texto)  # Status
+            worksheet.set_column('K:K', 12, formato_texto)  # Foi Encontrado
+            worksheet.set_column('L:L', 30, formato_texto)  # Descrição do Item
+            worksheet.set_column('M:M', 15, formato_texto)  # Operador Real
+            worksheet.set_column('N:N', 20, formato_texto)  # Importado em
+            worksheet.set_column('O:O', 20, formato_texto)  # Arquivo de Origem
+        
+        return nome_arquivo
+        
+    except Exception as e:
+        st.error(f"Erro ao exportar dados: {e}")
+        return None 
