@@ -651,8 +651,106 @@ if selected == "📊 Dashboard Manual":
     # Dashboard Principal
     st.markdown("## 📈 Dashboard de Performance")
 
-    # Calcular métricas
-    metricas = calcular_metricas(dados)
+    # Filtros de data e semana
+    st.markdown("### 🔍 Filtros")
+    
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        # Filtro por período de data
+        st.markdown("#### 📅 Filtro por Período")
+        
+        data_inicio = st.date_input(
+            "Data Início",
+            value=datetime.now() - timedelta(days=30),
+            key="filtro_data_inicio"
+        )
+        data_fim = st.date_input(
+            "Data Fim",
+            value=datetime.now(),
+            key="filtro_data_fim"
+        )
+    
+    with col2:
+        # Filtro por semana do ano
+        st.markdown("#### 📅 Filtro por Semana")
+        ano_atual = datetime.now().year
+        
+        ano_selecionado = st.selectbox(
+            "Ano",
+            options=[ano_atual - 1, ano_atual, ano_atual + 1],
+            index=1,
+            key="filtro_ano"
+        )
+        
+        # Gerar lista de semanas (segunda-feira como início da semana)
+        semanas = []
+        for semana in range(1, 53):  # 52 semanas + possíveis semanas extras
+            # Calcular data de início da semana (segunda-feira)
+            data_inicio_semana = datetime.strptime(f"{ano_selecionado}-W{semana:02d}-1", "%Y-W%W-%w")
+            if data_inicio_semana.year == ano_selecionado:
+                data_fim_semana = data_inicio_semana + timedelta(days=6)
+                semanas.append({
+                    'numero': semana,
+                    'inicio': data_inicio_semana,
+                    'fim': data_fim_semana,
+                    'label': f"Semana {semana} ({data_inicio_semana.strftime('%d/%m')} - {data_fim_semana.strftime('%d/%m')})"
+                })
+        
+        semana_selecionada = st.selectbox(
+            "Semana do Ano",
+            options=semanas,
+            format_func=lambda x: x['label'],
+            key="filtro_semana"
+        )
+    
+    with col3:
+        # Tipo de filtro
+        st.markdown("#### ⚙️ Tipo de Filtro")
+        
+        tipo_filtro = st.radio(
+            "Selecione o tipo de filtro:",
+            options=["📅 Período de Data", "📅 Semana do Ano", "📊 Todos os Dados"],
+            key="tipo_filtro"
+        )
+        
+        # Botão para limpar filtros
+        if st.button("🔄 Limpar Filtros", key="btn_limpar_filtros"):
+            # Limpar todos os filtros do session_state
+            for key in list(st.session_state.keys()):
+                if key.startswith('filtro_'):
+                    del st.session_state[key]
+            st.rerun()
+    
+    # Aplicar filtros aos dados
+    dados_filtrados = dados.copy() if dados else []
+    
+    if tipo_filtro == "📅 Período de Data":
+        if data_inicio and data_fim:
+            dados_filtrados = [
+                d for d in dados_filtrados 
+                if data_inicio <= datetime.strptime(d['data'], '%Y-%m-%d').date() <= data_fim
+            ]
+            st.info(f"📅 Filtrado por período: {data_inicio.strftime('%d/%m/%Y')} a {data_fim.strftime('%d/%m/%Y')} ({len(dados_filtrados)} registros)")
+    
+    elif tipo_filtro == "📅 Semana do Ano" and semana_selecionada:
+        dados_filtrados = [
+            d for d in dados_filtrados 
+            if semana_selecionada['inicio'].date() <= datetime.strptime(d['data'], '%Y-%m-%d').date() <= semana_selecionada['fim'].date()
+        ]
+        st.info(f"📅 Filtrado por semana: {semana_selecionada['label']} ({len(dados_filtrados)} registros)")
+    
+    else:
+        st.info(f"📊 Exibindo todos os dados ({len(dados_filtrados)} registros)")
+
+    # Estatísticas do período filtrado
+    if dados_filtrados:
+        datas_filtradas = [datetime.strptime(d['data'], '%Y-%m-%d').date() for d in dados_filtrados]
+        periodo_info = f"📅 Período: {min(datas_filtradas).strftime('%d/%m/%Y')} a {max(datas_filtradas).strftime('%d/%m/%Y')}"
+        st.success(f"{periodo_info} | 📊 {len(dados_filtrados)} dias de dados")
+
+    # Calcular métricas com dados filtrados
+    metricas = calcular_metricas(dados_filtrados)
 
     # Status geral da operação
     if dados:
@@ -724,11 +822,56 @@ if selected == "📊 Dashboard Manual":
         </div>
         """, unsafe_allow_html=True)
 
+    # Comparação com período anterior (se aplicável)
+    if dados_filtrados and len(dados_filtrados) > 0 and len(dados) > len(dados_filtrados):
+        st.markdown("### 📈 Comparação com Período Anterior")
+        
+        # Calcular métricas do período anterior (mesmo número de dias)
+        dias_periodo_atual = len(dados_filtrados)
+        dados_anteriores = dados[:-dias_periodo_atual][-dias_periodo_atual:] if len(dados) >= dias_periodo_atual * 2 else []
+        
+        if dados_anteriores:
+            metricas_anteriores = calcular_metricas(dados_anteriores)
+            
+            col1, col2, col3, col4 = st.columns(4)
+            
+            with col1:
+                variacao_pacotes = ((metricas['total_pacotes'] - metricas_anteriores['total_pacotes']) / metricas_anteriores['total_pacotes'] * 100) if metricas_anteriores['total_pacotes'] > 0 else 0
+                st.metric(
+                    "📦 Volume Total",
+                    f"{metricas['total_pacotes']:,}",
+                    f"{variacao_pacotes:+.1f}%"
+                )
+            
+            with col2:
+                variacao_flutuantes = metricas['taxa_flutuantes'] - metricas_anteriores['taxa_flutuantes']
+                st.metric(
+                    "🔴 Taxa Flutuantes",
+                    f"{metricas['taxa_flutuantes']:.2f}%",
+                    f"{variacao_flutuantes:+.2f}%"
+                )
+            
+            with col3:
+                variacao_sorting = metricas['taxa_erros_sorting'] - metricas_anteriores['taxa_erros_sorting']
+                st.metric(
+                    "🟠 Taxa Erros Sorting",
+                    f"{metricas['taxa_erros_sorting']:.2f}%",
+                    f"{variacao_sorting:+.2f}%"
+                )
+            
+            with col4:
+                variacao_etiquetagem = metricas['taxa_erros_etiquetagem'] - metricas_anteriores['taxa_erros_etiquetagem']
+                st.metric(
+                    "⚫ Taxa Erros Etiquetagem",
+                    f"{metricas['taxa_erros_etiquetagem']:.2f}%",
+                    f"{variacao_etiquetagem:+.2f}%"
+                )
+
     # Gráficos
     st.markdown("## 📊 Análise Temporal")
 
-    if dados:
-        df = pd.DataFrame(dados)
+    if dados_filtrados:
+        df = pd.DataFrame(dados_filtrados)
         df['data'] = pd.to_datetime(df['data'])
         df = df.sort_values('data')
         
@@ -861,11 +1004,12 @@ if selected == "📊 Dashboard Manual":
     # Seção de Insights
     st.markdown("## 💡 Insights e Recomendações")
 
-    if dados:
-        ultimos_7_dias = dados[-7:] if len(dados) >= 7 else dados
-        media_flutuantes = np.mean([d['flutuantes'] for d in ultimos_7_dias])
-        media_erros_sorting = np.mean([d['erros_sorting'] for d in ultimos_7_dias])
-        media_erros_etiquetagem = np.mean([d['erros_etiquetagem'] for d in ultimos_7_dias])
+    if dados_filtrados:
+        # Usar dados filtrados para insights
+        dados_para_insights = dados_filtrados[-7:] if len(dados_filtrados) >= 7 else dados_filtrados
+        media_flutuantes = np.mean([d['flutuantes'] for d in dados_para_insights])
+        media_erros_sorting = np.mean([d['erros_sorting'] for d in dados_para_insights])
+        media_erros_etiquetagem = np.mean([d['erros_etiquetagem'] for d in dados_para_insights])
         
         col1, col2, col3 = st.columns(3)
         
