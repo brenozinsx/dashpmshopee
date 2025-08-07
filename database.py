@@ -497,6 +497,43 @@ class DatabaseManager:
             st.error(f"❌ Erro ao carregar pacotes flutuantes do Supabase: {e}")
             return pd.DataFrame()
 
+    def load_pacotes_flutuantes_multiplos_operadores(self, limit: int = 1000, operadores_reais: list = None, data_inicio: str = None, data_fim: str = None) -> pd.DataFrame:
+        """Carrega dados de pacotes flutuantes do Supabase com suporte a múltiplos operadores"""
+        if not self.is_connected():
+            return pd.DataFrame()
+        
+        try:
+            query = self.supabase.table('pacotes_flutuantes').select('*').order('importado_em', desc=True)
+            
+            # Aplicar filtros
+            if operadores_reais and len(operadores_reais) > 0:
+                query = query.in_('operador_real', operadores_reais)
+            
+            if data_inicio:
+                query = query.gte('data_recebimento', data_inicio)
+            
+            if data_fim:
+                query = query.lte('data_recebimento', data_fim)
+            
+            response = query.limit(limit).execute()
+            
+            if response.data:
+                df = pd.DataFrame(response.data)
+                
+                # Converter colunas de data
+                if 'data_recebimento' in df.columns:
+                    df['data_recebimento'] = pd.to_datetime(df['data_recebimento'])
+                if 'importado_em' in df.columns:
+                    df['importado_em'] = pd.to_datetime(df['importado_em'])
+                
+                return df
+            else:
+                return pd.DataFrame()
+                
+        except Exception as e:
+            st.error(f"❌ Erro ao carregar pacotes flutuantes do Supabase: {e}")
+            return pd.DataFrame()
+
     def get_ranking_operadores_flutuantes(self) -> pd.DataFrame:
         """Obtém ranking de operadores com mais flutuantes"""
         if not self.is_connected():

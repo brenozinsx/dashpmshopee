@@ -162,4 +162,17 @@ tmp/
 !zerar_supabase.sql
 !limpar_dados_flutuantes.sql
 !limpar_dados_simples.sql
-!adicionar_indice_tracking.sql 
+!adicionar_indice_tracking.sql
+!adicionar_coluna_flutuantes_revertidos.sql
+
+# Arquivos temporários do projeto
+teste_*.py
+investigacao_*.py
+validacao_*.py
+*_debug.py
+*_temp.py
+detalhamento_flutuantes_*.xlsx
+ranking_operadores_*.xlsx
+*.xls
+debug_*.txt
+temp_*.json 

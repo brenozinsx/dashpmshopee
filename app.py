@@ -26,9 +26,11 @@ from utils import (
     salvar_dados_operacao, carregar_dados_operacao, salvar_dados_validacao,
     carregar_dados_validacao, salvar_flutuantes_operador, carregar_flutuantes_operador,
     sincronizar_dados_locais, obter_estatisticas_banco, processar_csv_flutuantes,
-    salvar_pacotes_flutuantes, carregar_pacotes_flutuantes, obter_ranking_operadores_flutuantes,
-    obter_resumo_flutuantes_estacao, obter_total_flutuantes_por_data, exportar_flutuantes_excel,
-    processar_csv_dados_diarios, processar_multiplos_csvs_dados_diarios
+    salvar_pacotes_flutuantes, carregar_pacotes_flutuantes, carregar_pacotes_flutuantes_multiplos_operadores,
+    obter_ranking_operadores_flutuantes, obter_resumo_flutuantes_estacao, obter_total_flutuantes_por_data, 
+    exportar_flutuantes_excel, processar_csv_dados_diarios, processar_multiplos_csvs_dados_diarios,
+    agrupar_operadores_duplicados, obter_estatisticas_duplicacao_operadores, diagnosticar_operador,
+    verificar_normalizacao_operador, buscar_operadores_por_padrao, carregar_pacotes_flutuantes_com_mapeamento
 )
 
 # Sistema de mensagens temporárias
@@ -1008,12 +1010,46 @@ if selected == "📊 Dashboard Manual":
     if dados_filtrados and len(dados_filtrados) > 0 and len(dados) > len(dados_filtrados):
         st.markdown("### 📈 Comparação com Período Anterior")
         
-        # Calcular métricas do período anterior (mesmo número de dias)
-        dias_periodo_atual = len(dados_filtrados)
-        dados_anteriores = dados[:-dias_periodo_atual][-dias_periodo_atual:] if len(dados) >= dias_periodo_atual * 2 else []
+        # NOVA LÓGICA: Comparar por semana do ano em vez de período consecutivo
+        import pandas as pd
+        from datetime import datetime
+        
+        # Converter dados para DataFrame para facilitar análise
+        df_todos = pd.DataFrame(dados)
+        df_filtrados = pd.DataFrame(dados_filtrados)
+        
+        # Adicionar coluna de semana do ano
+        df_todos['data'] = pd.to_datetime(df_todos['data'])
+        df_filtrados['data'] = pd.to_datetime(df_filtrados['data'])
+        df_todos['semana_ano'] = df_todos['data'].dt.isocalendar().week
+        df_filtrados['semana_ano'] = df_filtrados['data'].dt.isocalendar().week
+        
+        # Identificar a semana do período atual
+        semanas_atual = sorted(df_filtrados['semana_ano'].unique())
+        semana_atual = semanas_atual[0] if len(semanas_atual) == 1 else f"{min(semanas_atual)}-{max(semanas_atual)}"
+        
+        # Buscar dados da semana anterior
+        dados_anteriores = []
+        if len(semanas_atual) == 1:
+            # Se todos os dados filtrados são da mesma semana
+            semana_anterior = semanas_atual[0] - 1
+            dados_semana_anterior = df_todos[df_todos['semana_ano'] == semana_anterior]
+            if not dados_semana_anterior.empty:
+                dados_anteriores = dados_semana_anterior.to_dict('records')
+        else:
+            # Se os dados filtrados abrangem múltiplas semanas, usar lógica anterior como fallback
+            dias_periodo_atual = len(dados_filtrados)
+            dados_anteriores = dados[:-dias_periodo_atual][-dias_periodo_atual:] if len(dados) >= dias_periodo_atual * 2 else []
         
         if dados_anteriores:
             metricas_anteriores = calcular_metricas(dados_anteriores)
+            
+            # Mostrar informações de debug sobre a comparação
+            if len(semanas_atual) == 1:
+                semana_anterior = semanas_atual[0] - 1
+                st.info(f"📊 Comparando Semana {semanas_atual[0]} vs Semana {semana_anterior} (mesmo número de dias)")
+            else:
+                st.info(f"📊 Comparando período de {len(dados_filtrados)} dias vs período anterior equivalente")
             
             col1, col2, col3, col4 = st.columns(4)
             
@@ -1027,27 +1063,48 @@ if selected == "📊 Dashboard Manual":
             
             with col2:
                 variacao_flutuantes = metricas['taxa_flutuantes'] - metricas_anteriores['taxa_flutuantes']
-                st.metric(
-                    "🔴 Taxa Flutuantes",
-                    f"{metricas['taxa_flutuantes']:.2f}%",
-                    f"{variacao_flutuantes:+.2f}%"
-                )
+                # Para taxa flutuantes: diminuição é boa (verde), aumento é ruim (vermelho)
+                cor_flutuantes = "green" if variacao_flutuantes < 0 else "red" if variacao_flutuantes > 0 else "gray"
+                seta_flutuantes = "↘️" if variacao_flutuantes < 0 else "↗️" if variacao_flutuantes > 0 else "➡️"
+                st.markdown(f"""
+                <div style="background: white; padding: 1rem; border-radius: 10px; border-left: 4px solid {cor_flutuantes}; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+                    <div style="font-size: 0.9rem; color: #666; margin-bottom: 0.5rem;">🔴 Taxa Flutuantes</div>
+                    <div style="font-size: 1.5rem; font-weight: bold; color: #333;">{metricas['taxa_flutuantes']:.2f}%</div>
+                    <div style="font-size: 1rem; color: {cor_flutuantes}; font-weight: bold;">
+                        {seta_flutuantes} {variacao_flutuantes:+.2f}%
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
             
             with col3:
                 variacao_sorting = metricas['taxa_erros_sorting'] - metricas_anteriores['taxa_erros_sorting']
-                st.metric(
-                    "🟠 Taxa Erros Sorting",
-                    f"{metricas['taxa_erros_sorting']:.2f}%",
-                    f"{variacao_sorting:+.2f}%"
-                )
+                # Para taxa erros sorting: diminuição é boa (verde), aumento é ruim (vermelho)
+                cor_sorting = "green" if variacao_sorting < 0 else "red" if variacao_sorting > 0 else "gray"
+                seta_sorting = "↘️" if variacao_sorting < 0 else "↗️" if variacao_sorting > 0 else "➡️"
+                st.markdown(f"""
+                <div style="background: white; padding: 1rem; border-radius: 10px; border-left: 4px solid {cor_sorting}; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+                    <div style="font-size: 0.9rem; color: #666; margin-bottom: 0.5rem;">🟠 Taxa Erros Sorting</div>
+                    <div style="font-size: 1.5rem; font-weight: bold; color: #333;">{metricas['taxa_erros_sorting']:.2f}%</div>
+                    <div style="font-size: 1rem; color: {cor_sorting}; font-weight: bold;">
+                        {seta_sorting} {variacao_sorting:+.2f}%
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
             
             with col4:
                 variacao_etiquetagem = metricas['taxa_erros_etiquetagem'] - metricas_anteriores['taxa_erros_etiquetagem']
-                st.metric(
-                    "⚫ Taxa Erros Etiquetagem",
-                    f"{metricas['taxa_erros_etiquetagem']:.2f}%",
-                    f"{variacao_etiquetagem:+.2f}%"
-                )
+                # Para taxa erros etiquetagem: diminuição é boa (verde), aumento é ruim (vermelho)
+                cor_etiquetagem = "green" if variacao_etiquetagem < 0 else "red" if variacao_etiquetagem > 0 else "gray"
+                seta_etiquetagem = "↘️" if variacao_etiquetagem < 0 else "↗️" if variacao_etiquetagem > 0 else "➡️"
+                st.markdown(f"""
+                <div style="background: white; padding: 1rem; border-radius: 10px; border-left: 4px solid {cor_etiquetagem}; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+                    <div style="font-size: 0.9rem; color: #666; margin-bottom: 0.5rem;">⚫ Taxa Erros Etiquetagem</div>
+                    <div style="font-size: 1.5rem; font-weight: bold; color: #333;">{metricas['taxa_erros_etiquetagem']:.2f}%</div>
+                    <div style="font-size: 1rem; color: {cor_etiquetagem}; font-weight: bold;">
+                        {seta_etiquetagem} {variacao_etiquetagem:+.2f}%
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
 
     # Gráficos
     st.markdown("## 📊 Análise Temporal")
@@ -1177,7 +1234,7 @@ if selected == "📊 Dashboard Manual":
             # Tabela de dados
             st.markdown("### 📋 Histórico de Dados")
             df_display = df.copy()
-            df_display['data'] = df_display['data'].dt.strftime('%d/%m/%Y')
+            df_display['data'] = pd.to_datetime(df_display['data'], errors='coerce').dt.strftime('%d/%m/%Y')
             st.dataframe(df_display, use_container_width=True)
 
     else:
@@ -1654,204 +1711,708 @@ elif selected == "📦 Pacotes Flutuantes":
                             )
     
     with tab2:
-        st.markdown("### 📊 Ranking de Operadores com Mais Flutuantes")
+        st.markdown("### 📊 Ranking Dinâmico de Operadores - Análise de Performance")
         
-        # Filtros para o ranking
-        col1, col2, col3, col4 = st.columns(4)
+        # Filtros avançados para o ranking
+        col1, col2, col3 = st.columns(3)
         
         with col1:
-            operador_filtro_ranking = st.text_input("Filtrar por Operador Real", placeholder="Digite o nome do operador", key="operador_ranking")
+            # Carregar lista de operadores para o filtro múltiplo
+            df_operadores = carregar_pacotes_flutuantes(10000)  # Carregar mais dados para obter todos os operadores
+            if not df_operadores.empty and 'operador_real' in df_operadores.columns:
+                # Aplicar normalização para evitar duplicados na lista
+                df_operadores_normalizado = agrupar_operadores_duplicados(df_operadores)
+                operadores_unicos = sorted(df_operadores_normalizado['operador_real'].dropna().unique())
+                
+                # Mostrar estatísticas de duplicação
+                stats_duplicacao = obter_estatisticas_duplicacao_operadores(df_operadores)
+                if stats_duplicacao.get('duplicados_encontrados', 0) > 0:
+                    st.info(f"🔄 {stats_duplicacao['duplicados_encontrados']} operadores duplicados foram agrupados automaticamente")
+                    
+                    # Mostrar detalhes dos duplicados em um expander
+                    with st.expander("🔍 Ver Detalhes dos Operadores Agrupados"):
+                        st.markdown("**Operadores que foram agrupados por código:**")
+                        for codigo, count in stats_duplicacao.get('detalhes_duplicados', {}).items():
+                            st.write(f"- Código `{codigo}`: {count} variações encontradas")
+                        
+                        # Mostrar antes/depois se houver duplicados
+                        if stats_duplicacao.get('duplicados_encontrados', 0) > 0:
+                            col_antes, col_depois = st.columns(2)
+                            
+                            with col_antes:
+                                st.markdown("**Antes (com duplicados):**")
+                                operadores_originais = sorted(df_operadores['operador_real'].dropna().unique())
+                                for op in operadores_originais[:10]:  # Mostrar apenas os primeiros 10
+                                    st.text(f"• {op}")
+                                if len(operadores_originais) > 10:
+                                    st.text(f"... e mais {len(operadores_originais) - 10}")
+                            
+                            with col_depois:
+                                st.markdown("**Depois (agrupados):**")
+                                for op in operadores_unicos[:10]:  # Mostrar apenas os primeiros 10
+                                    st.text(f"• {op}")
+                                if len(operadores_unicos) > 10:
+                                    st.text(f"... e mais {len(operadores_unicos) - 10}")
+                
+                else:
+                    st.success("✅ Nenhum operador duplicado encontrado")
+                
+                # Seção de diagnóstico para operadores não encontrados
+                with st.expander("🔍 Diagnóstico de Operadores"):
+                    st.markdown("**Ferramenta para investigar problemas com operadores específicos**")
+                    
+                    col_diag1, col_diag2 = st.columns(2)
+                    
+                    with col_diag1:
+                        nome_diagnostico = st.text_input(
+                            "Nome para diagnóstico:",
+                            placeholder="Ex: monica",
+                            help="Digite o nome do operador para investigar"
+                        )
+                        
+                        if st.button("🔍 Diagnosticar") and nome_diagnostico:
+                            resultado_diag = diagnosticar_operador(df_operadores, nome_diagnostico)
+                            
+                            st.markdown("**Resultados do Diagnóstico:**")
+                            
+                            if resultado_diag.get('operadores_exatos'):
+                                st.success(f"✅ Operadores encontrados (busca exata): {len(resultado_diag['operadores_exatos'])}")
+                                for op in resultado_diag['operadores_exatos']:
+                                    st.write(f"• {op}")
+                            
+                            if resultado_diag.get('operadores_similares'):
+                                st.info(f"📋 Operadores similares encontrados: {len(resultado_diag['operadores_similares'])}")
+                                for op in resultado_diag['operadores_similares']:
+                                    st.write(f"• {op}")
+                            
+                            if resultado_diag.get('operadores_com_monica'):
+                                st.warning(f"🔍 Operadores contendo 'monica': {len(resultado_diag['operadores_com_monica'])}")
+                                for op in resultado_diag['operadores_com_monica']:
+                                    st.write(f"• {op}")
+                            
+                            # Mostrar dados dos operadores encontrados
+                            if resultado_diag.get('dados_operadores'):
+                                st.markdown("**Dados dos Operadores:**")
+                                for operador, dados in resultado_diag['dados_operadores'].items():
+                                    with st.container():
+                                        st.write(f"**{operador}:**")
+                                        st.write(f"- Total de flutuantes: {dados['total_flutuantes']}")
+                                        st.write(f"- Encontrados: {dados['encontrados']}")
+                                        st.write(f"- Período: {dados['datas']['primeira']} a {dados['datas']['ultima']}")
+                    
+                    with col_diag2:
+                        st.markdown("**Lista de Operadores (primeiros 10):**")
+                        if df_operadores_normalizado is not None:
+                            primeiros_ops = sorted(df_operadores_normalizado['operador_real'].dropna().unique())[:10]
+                            for op in primeiros_ops:
+                                st.text(f"• {op}")
+                        
+                        if st.button("📋 Mostrar Todos os Operadores"):
+                            todos_ops = sorted(df_operadores_normalizado['operador_real'].dropna().unique())
+                            st.markdown("**Todos os Operadores:**")
+                            for i, op in enumerate(todos_ops, 1):
+                                st.text(f"{i:3d}. {op}")
+                
+                operadores_selecionados = st.multiselect(
+                    "Filtrar por Operador Real",
+                    options=operadores_unicos,
+                    default=[],
+                    help="Selecione um ou mais operadores para filtrar. Operadores com códigos duplicados são agrupados automaticamente.",
+                    key="operadores_multiplos"
+                )
+            else:
+                operadores_selecionados = []
         
         with col2:
-            data_inicio_ranking = st.date_input("Data Início", value=None, help="Filtrar a partir desta data", key="data_inicio_ranking")
+            periodo_analise = st.selectbox(
+                "Período de Análise",
+                options=[
+                    "Últimos 7 dias",
+                    "Últimos 15 dias", 
+                    "Últimos 30 dias",
+                    "Últimos 60 dias",
+                    "Últimos 90 dias",
+                    "Último ano",
+                    "Todos os dados"
+                ],
+                index=2,  # Últimos 30 dias como padrão
+                key="periodo_analise"
+            )
         
         with col3:
-            data_fim_ranking = st.date_input("Data Fim", value=None, help="Filtrar até esta data", key="data_fim_ranking")
+            criterio_ordenacao = st.selectbox(
+                "Critério de Ordenação",
+                options=[
+                    "Total de Flutuantes",
+                    "Flutuantes Recentes (últimos 7 dias)",
+                    "Taxa de Encontrados",
+                    "Aging Médio",
+                    "Melhoria de Performance",
+                    "Piora de Performance"
+                ],
+                index=0,
+                key="criterio_ordenacao"
+            )
         
-        with col4:
-            limit_registros_ranking = st.number_input("Limite de Registros", min_value=100, max_value=10000, value=1000, step=100, key="limit_ranking")
+        # Calcular datas baseado no período selecionado
+        from datetime import datetime, timedelta
+        hoje = datetime.now().date()
         
-        # Converter datas para string se selecionadas
-        data_inicio_str_ranking = data_inicio_ranking.strftime('%Y-%m-%d') if data_inicio_ranking else None
-        data_fim_str_ranking = data_fim_ranking.strftime('%Y-%m-%d') if data_fim_ranking else None
+        if periodo_analise == "Últimos 7 dias":
+            data_inicio = (hoje - timedelta(days=7)).strftime('%Y-%m-%d')
+            data_fim = hoje.strftime('%Y-%m-%d')
+        elif periodo_analise == "Últimos 15 dias":
+            data_inicio = (hoje - timedelta(days=15)).strftime('%Y-%m-%d')
+            data_fim = hoje.strftime('%Y-%m-%d')
+        elif periodo_analise == "Últimos 30 dias":
+            data_inicio = (hoje - timedelta(days=30)).strftime('%Y-%m-%d')
+            data_fim = hoje.strftime('%Y-%m-%d')
+        elif periodo_analise == "Últimos 60 dias":
+            data_inicio = (hoje - timedelta(days=60)).strftime('%Y-%m-%d')
+            data_fim = hoje.strftime('%Y-%m-%d')
+        elif periodo_analise == "Últimos 90 dias":
+            data_inicio = (hoje - timedelta(days=90)).strftime('%Y-%m-%d')
+            data_fim = hoje.strftime('%Y-%m-%d')
+        elif periodo_analise == "Último ano":
+            data_inicio = (hoje - timedelta(days=365)).strftime('%Y-%m-%d')
+            data_fim = hoje.strftime('%Y-%m-%d')
+        else:  # Todos os dados
+            data_inicio = None
+            data_fim = None
         
-        # Carregar dados filtrados para ranking
-        df_flutuantes_ranking = carregar_pacotes_flutuantes(limit_registros_ranking, operador_filtro_ranking, data_inicio_str_ranking, data_fim_str_ranking)
+        # Carregar dados filtrados com mapeamento automático
+        df_flutuantes_ranking = carregar_pacotes_flutuantes_com_mapeamento(10000, operadores_selecionados, data_inicio, data_fim)
         
-        # Calcular ranking manualmente com os dados filtrados
         if not df_flutuantes_ranking.empty:
-            # Mostrar informações sobre os dados carregados
-            st.info(f"📊 Carregados {len(df_flutuantes_ranking)} registros para análise")
+            # Aplicar normalização de operadores duplicados
+            df_flutuantes_ranking = agrupar_operadores_duplicados(df_flutuantes_ranking)
+            # Calcular dados de evolução temporal
+            st.markdown("### 📈 Análise de Evolução e Performance")
             
-            # Verificar se há dados de foi_encontrado
-            if 'foi_encontrado' in df_flutuantes_ranking.columns:
-                total_encontrados = df_flutuantes_ranking['foi_encontrado'].sum()
-                st.success(f"✅ {total_encontrados} pacotes encontrados (Foi encontrado = True)")
-            
-        if not df_flutuantes_ranking.empty:
-            # Debug: verificar tipos de dados
-            st.write("🔍 Debug - Tipos de dados:")
-            if 'foi_encontrado' in df_flutuantes_ranking.columns:
-                st.write(f"Tipo do campo foi_encontrado: {df_flutuantes_ranking['foi_encontrado'].dtype}")
-                st.write(f"Valores únicos do foi_encontrado: {df_flutuantes_ranking['foi_encontrado'].unique()}")
-            
-            # Calcular ranking manualmente
-            ranking = df_flutuantes_ranking.groupby('operador_real').agg({
+            # Calcular métricas por operador
+            ranking_evolucao = df_flutuantes_ranking.groupby('operador_real').agg({
                 'operador_real': 'count',
-                'foi_encontrado': lambda x: x.sum(),  # Usar campo foi_encontrado
+                'foi_encontrado': lambda x: x.sum(),
                 'aging': 'mean',
                 'data_recebimento': ['min', 'max']
             }).reset_index()
             
             # Renomear colunas
-            ranking.columns = [
+            ranking_evolucao.columns = [
                 'operador_real', 'total_flutuantes', 'flutuantes_encontrados',
                 'aging_medio', 'primeira_data', 'ultima_data'
             ]
             
-            # Garantir que as colunas sejam numéricas
-            ranking['total_flutuantes'] = pd.to_numeric(ranking['total_flutuantes'], errors='coerce').fillna(0)
-            ranking['flutuantes_encontrados'] = pd.to_numeric(ranking['flutuantes_encontrados'], errors='coerce').fillna(0)
+            # Calcular métricas adicionais
+            ranking_evolucao['flutuantes_nao_encontrados'] = ranking_evolucao['total_flutuantes'] - ranking_evolucao['flutuantes_encontrados']
+            ranking_evolucao['taxa_encontrados'] = (ranking_evolucao['flutuantes_encontrados'] / ranking_evolucao['total_flutuantes'] * 100).round(2)
             
-            # Calcular taxa de encontrados
-            ranking['flutuantes_nao_encontrados'] = ranking['total_flutuantes'] - ranking['flutuantes_encontrados']
-            ranking['taxa_encontrados'] = (ranking['flutuantes_encontrados'] / ranking['total_flutuantes'] * 100).round(2)
+            # Calcular flutuantes recentes (últimos 7 dias)
+            data_7_dias_atras = (hoje - timedelta(days=7)).strftime('%Y-%m-%d')
+            df_recentes = df_flutuantes_ranking[df_flutuantes_ranking['data_recebimento'] >= data_7_dias_atras]
             
-            # Ordenar por total de flutuantes
-            df_ranking = ranking.sort_values('total_flutuantes', ascending=False)
-        else:
-            df_ranking = pd.DataFrame()
-        
-        if not df_ranking.empty:
+            if not df_recentes.empty:
+                flutuantes_recentes = df_recentes.groupby('operador_real').size().reset_index(name='flutuantes_recentes')
+                ranking_evolucao = ranking_evolucao.merge(flutuantes_recentes, on='operador_real', how='left')
+                ranking_evolucao['flutuantes_recentes'] = ranking_evolucao['flutuantes_recentes'].fillna(0)
+            else:
+                ranking_evolucao['flutuantes_recentes'] = 0
+            
+            # Calcular dias desde o último flutuante
+            ranking_evolucao['ultima_data'] = pd.to_datetime(ranking_evolucao['ultima_data'], errors='coerce')
+            # Verificar se a conversão foi bem-sucedida antes de calcular os dias
+            ranking_evolucao['dias_ultimo_flutuante'] = ranking_evolucao['ultima_data'].apply(
+                lambda x: (hoje - x.date()).days if pd.notna(x) else 999  # 999 para datas inválidas
+            )
+            
+            # Calcular indicadores de performance baseado em flutuantes e dias sem flutuantes
+            def calcular_status_performance(row):
+                flutuantes_recentes = row['flutuantes_recentes']
+                total_flutuantes = row['total_flutuantes']
+                dias_ultimo = row['dias_ultimo_flutuante']
+                
+                # Critério principal: flutuantes recentes (últimos 7 dias)
+                if flutuantes_recentes == 0:
+                    # Sem flutuantes recentes - analisar histórico geral
+                    if dias_ultimo >= 30:  # Mais de 30 dias sem flutuantes
+                        return '🟢 Excelente'
+                    elif dias_ultimo >= 14:  # 14-29 dias sem flutuantes
+                        return '🟡 Bom'
+                    elif dias_ultimo >= 7:   # 7-13 dias sem flutuantes
+                        return '🟡 Bom'
+                    else:  # Menos de 7 dias (mas sem flutuantes na última semana)
+                        return '🟡 Bom'
+                
+                elif flutuantes_recentes <= 2:
+                    # Poucos flutuantes recentes - situação de atenção
+                    return '🟠 Atenção'
+                
+                elif flutuantes_recentes <= 5:
+                    # Muitos flutuantes recentes - situação crítica
+                    return '🔴 Crítico'
+                
+                else:
+                    # Flutuantes recentes excessivos - situação muito crítica
+                    return '🔴 Crítico'
+            
+            ranking_evolucao['status_performance'] = ranking_evolucao.apply(calcular_status_performance, axis=1)
+            
+            # Calcular tendência (comparar últimos 7 dias vs período anterior)
+            if periodo_analise != "Últimos 7 dias" and periodo_analise != "Todos os dados":
+                # Período anterior (mesmo tamanho do período atual)
+                dias_periodo = {
+                    "Últimos 15 dias": 15,
+                    "Últimos 30 dias": 30,
+                    "Últimos 60 dias": 60,
+                    "Últimos 90 dias": 90,
+                    "Último ano": 365
+                }
+                
+                dias = dias_periodo.get(periodo_analise, 30)
+                data_periodo_anterior_inicio = (hoje - timedelta(days=dias*2)).strftime('%Y-%m-%d')
+                data_periodo_anterior_fim = (hoje - timedelta(days=dias)).strftime('%Y-%m-%d')
+                
+                df_periodo_anterior = carregar_pacotes_flutuantes(10000, None, data_periodo_anterior_inicio, data_periodo_anterior_fim)
+                if not df_periodo_anterior.empty and operadores_selecionados:
+                    df_periodo_anterior = df_periodo_anterior[df_periodo_anterior['operador_real'].isin(operadores_selecionados)]
+                
+                if not df_periodo_anterior.empty:
+                    flutuantes_anterior = df_periodo_anterior.groupby('operador_real').size().reset_index(name='flutuantes_anterior')
+                    ranking_evolucao = ranking_evolucao.merge(flutuantes_anterior, on='operador_real', how='left')
+                    ranking_evolucao['flutuantes_anterior'] = ranking_evolucao['flutuantes_anterior'].fillna(0)
+                    ranking_evolucao['tendencia'] = ranking_evolucao['total_flutuantes'] - ranking_evolucao['flutuantes_anterior']
+                    ranking_evolucao['tendencia_percentual'] = ((ranking_evolucao['total_flutuantes'] - ranking_evolucao['flutuantes_anterior']) / ranking_evolucao['flutuantes_anterior'] * 100).fillna(0).round(1)
+                else:
+                    ranking_evolucao['tendencia'] = 0
+                    ranking_evolucao['tendencia_percentual'] = 0
+            else:
+                ranking_evolucao['tendencia'] = 0
+                ranking_evolucao['tendencia_percentual'] = 0
+            
+            # Ordenar baseado no critério selecionado
+            if criterio_ordenacao == "Total de Flutuantes":
+                ranking_evolucao = ranking_evolucao.sort_values('total_flutuantes', ascending=False)
+            elif criterio_ordenacao == "Flutuantes Recentes (últimos 7 dias)":
+                ranking_evolucao = ranking_evolucao.sort_values('flutuantes_recentes', ascending=False)
+            elif criterio_ordenacao == "Taxa de Encontrados":
+                ranking_evolucao = ranking_evolucao.sort_values('taxa_encontrados', ascending=False)
+            elif criterio_ordenacao == "Aging Médio":
+                ranking_evolucao = ranking_evolucao.sort_values('aging_medio', ascending=True)
+            elif criterio_ordenacao == "Melhoria de Performance":
+                ranking_evolucao = ranking_evolucao.sort_values('tendencia', ascending=True)  # Menos flutuantes = melhoria
+            elif criterio_ordenacao == "Piora de Performance":
+                ranking_evolucao = ranking_evolucao.sort_values('tendencia', ascending=False)  # Mais flutuantes = piora
+            
             # Métricas gerais
             col1, col2, col3, col4 = st.columns(4)
             
             with col1:
-                total_flutuantes = df_ranking['total_flutuantes'].sum()
+                total_flutuantes = ranking_evolucao['total_flutuantes'].sum()
                 st.metric("Total Flutuantes", f"{total_flutuantes:,}")
             
             with col2:
-                operadores_afetados = len(df_ranking)
-                st.metric("Operadores Afetados", operadores_afetados)
+                operadores_afetados = len(ranking_evolucao)
+                st.metric("Operadores Analisados", operadores_afetados)
             
             with col3:
-                media_flutuantes = df_ranking['total_flutuantes'].mean()
-                st.metric("Média por Operador", f"{media_flutuantes:.1f}")
+                flutuantes_recentes_total = ranking_evolucao['flutuantes_recentes'].sum()
+                st.metric("Flutuantes Recentes (7d)", f"{flutuantes_recentes_total}")
             
             with col4:
-                taxa_media_encontrados = df_ranking['taxa_encontrados'].mean()
+                taxa_media_encontrados = ranking_evolucao['taxa_encontrados'].mean()
                 st.metric("Taxa Média Encontrados", f"{taxa_media_encontrados:.1f}%")
             
-            # Top 10 operadores
-            st.markdown("### 🏆 Top 10 Operadores com Mais Flutuantes")
+            # Tabela principal com indicadores de performance
+            st.markdown("### 🏆 Ranking de Performance dos Operadores")
             
-            # Formatar dados para exibição
-            df_display = df_ranking.head(10).copy()
-            df_display['taxa_encontrados'] = df_display['taxa_encontrados'].round(2)
+            # Preparar dados para exibição
+            df_display = ranking_evolucao.copy()
+            
+            # Adicionar emojis para tendência
+            df_display['tendencia_emoji'] = df_display['tendencia'].apply(lambda x: 
+                '📈' if x < 0 else '📉' if x > 0 else '➡️'
+            )
+            
+            # Formatar colunas
+            df_display['taxa_encontrados'] = df_display['taxa_encontrados'].round(1)
             df_display['aging_medio'] = df_display['aging_medio'].round(1)
+            df_display['tendencia_percentual'] = df_display['tendencia_percentual'].round(1)
             
             # Renomear colunas
             df_display = df_display.rename(columns={
                 'operador_real': 'Operador',
                 'total_flutuantes': 'Total Flutuantes',
+                'flutuantes_recentes': 'Flutuantes 7d',
                 'flutuantes_encontrados': 'Encontrados',
-                'flutuantes_nao_encontrados': 'Não Encontrados',
                 'taxa_encontrados': 'Taxa Encontrados (%)',
                 'aging_medio': 'Aging Médio',
-                'primeira_data': 'Primeira Data',
-                'ultima_data': 'Última Data'
+                'dias_ultimo_flutuante': 'Dias Último',
+                'status_performance': 'Status',
+                'tendencia_percentual': 'Tendência (%)',
+                'tendencia_emoji': '📊'
             })
             
-            st.dataframe(df_display, use_container_width=True)
+            # Selecionar colunas para exibição
+            colunas_exibicao = [
+                'Operador', 'Total Flutuantes', 'Flutuantes 7d', 'Encontrados', 
+                'Taxa Encontrados (%)', 'Aging Médio', 'Dias Último', 'Status', 'Tendência (%)', '📊'
+            ]
             
-            # Gráfico de barras
-            st.markdown("### 📈 Gráfico de Flutuantes por Operador")
+            st.dataframe(df_display[colunas_exibicao], use_container_width=True)
             
-            fig = px.bar(
-                df_ranking.head(15),
-                x='operador_real',
-                y='total_flutuantes',
-                title='Top 15 Operadores com Mais Flutuantes',
-                labels={'operador_real': 'Operador', 'total_flutuantes': 'Total de Flutuantes'},
-                color='total_flutuantes',
-                color_continuous_scale='Reds',
-                text='total_flutuantes'  # Adicionar rótulos de dados
-            )
+            # Seção de análise detalhada por operador
+            st.markdown("### 🔍 Análise Detalhada por Operador")
             
-            # Melhorar visualização
-            fig.update_layout(
-                xaxis_tickangle=-45,
-                font=dict(size=14),  # Aumentar fonte geral
-                title_font_size=18,  # Fonte do título
-                xaxis_title_font_size=16,  # Fonte do eixo X
-                yaxis_title_font_size=16,  # Fonte do eixo Y
-                height=500,  # Aumentar altura
-                xaxis=dict(
-                    tickfont=dict(size=12, color='black'),
-                    tickangle=-45
+            if not df_display.empty:
+                operador_selecionado = st.selectbox(
+                    "Selecione um operador para análise detalhada:",
+                    options=df_display['Operador'].tolist(),
+                    key="operador_detalhado"
                 )
-            )
+                
+                if operador_selecionado:
+                    # Filtrar dados do operador selecionado
+                    df_operador = df_flutuantes_ranking[df_flutuantes_ranking['operador_real'] == operador_selecionado]
+                    dados_operador = df_display[df_display['Operador'] == operador_selecionado].iloc[0]
+                    
+                    col1, col2 = st.columns(2)
+                    
+                    with col1:
+                        st.markdown(f"#### 📊 Performance de {operador_selecionado}")
+                        
+                        # Métricas do operador
+                        st.metric("Total de Flutuantes", f"{dados_operador['Total Flutuantes']:,}")
+                        st.metric("Flutuantes nos Últimos 7 dias", f"{dados_operador['Flutuantes 7d']}")
+                        st.metric("Taxa de Encontrados", f"{dados_operador['Taxa Encontrados (%)']}%")
+                        st.metric("Aging Médio", f"{dados_operador['Aging Médio']} dias")
+                        st.metric("Dias desde Último Flutuante", f"{dados_operador['Dias Último']}")
+                        
+                        # Feedback baseado na performance (foco em prevenção de flutuantes)
+                        st.markdown("#### 💡 Feedback e Recomendações")
+                        
+                        if dados_operador['Status'] == '🟢 Excelente':
+                            st.success("🎉 **Performance Excelente!** Sem flutuantes recentes e mantendo consistência. Continue assim!")
+                            if dados_operador['Dias Último'] >= 30:
+                                st.info(f"🏆 **Destaque:** {dados_operador['Dias Último']} dias consecutivos sem flutuantes!")
+                        
+                        elif dados_operador['Status'] == '🟡 Bom':
+                            st.info("👍 **Performance Boa!** Sem flutuantes na última semana, mas mantenha a vigilância.")
+                            if dados_operador['Dias Último'] >= 14:
+                                st.success(f"✅ **Progresso positivo:** {dados_operador['Dias Último']} dias sem flutuantes.")
+                            else:
+                                st.warning("💡 **Dica:** Foque na prevenção para aumentar o período sem flutuantes.")
+                        
+                        elif dados_operador['Status'] == '🟠 Atenção':
+                            st.warning("⚠️ **Atenção Necessária!** Flutuantes recentes detectados - revise processos urgentemente.")
+                            st.error(f"🎯 **Foco:** Elimine os {dados_operador['Flutuantes 7d']} flutuantes dos últimos 7 dias.")
+                            st.info("📋 **Ações recomendadas:**\n- Revisar procedimentos de manuseio\n- Verificar organização do espaço de trabalho\n- Atenção redobrada nos próximos dias")
+                        
+                        else:  # Crítico
+                            st.error("🚨 **Situação Crítica!** Alto número de flutuantes recentes - intervenção imediata necessária.")
+                            st.error(f"🎯 **Urgente:** {dados_operador['Flutuantes 7d']} flutuantes nos últimos 7 dias!")
+                            st.warning("📋 **Plano de ação imediato:**\n- Supervisão próxima\n- Revisão completa de processos\n- Treinamento de reforço\n- Análise das causas raiz")
+                        
+                        # Recomendações específicas baseadas em números
+                        if dados_operador['Flutuantes 7d'] > 0:
+                            if dados_operador['Flutuantes 7d'] == 1:
+                                st.info("📌 **Meta:** Evitar novos flutuantes nos próximos 7 dias.")
+                            elif dados_operador['Flutuantes 7d'] <= 3:
+                                st.warning("📌 **Meta urgente:** Reduzir flutuantes pela metade na próxima semana.")
+                            else:
+                                st.error("📌 **Meta crítica:** Implementar plano de ação imediato para zerar flutuantes.")
+                        
+                        if dados_operador['Dias Último'] > 30:
+                            st.success(f"🏅 **Reconhecimento:** {dados_operador['Dias Último']} dias sem flutuantes - exemplo para a equipe!")
+                        elif dados_operador['Dias Último'] >= 7 and dados_operador['Flutuantes 7d'] == 0:
+                            st.info(f"📈 **Tendência positiva:** {dados_operador['Dias Último']} dias sem flutuantes. Continue assim!")
+                        
+                        # Meta de melhoria
+                        if dados_operador['Flutuantes 7d'] == 0:
+                            dias_meta = max(30, dados_operador['Dias Último'] + 7)
+                            st.info(f"🎯 **Próxima meta:** Alcançar {dias_meta} dias consecutivos sem flutuantes.")
+                    
+                    with col2:
+                        st.markdown("#### 📈 Evolução Temporal")
+                        
+                        # Gráfico de flutuantes por data
+                        if not df_operador.empty:
+                            df_operador['data_recebimento'] = pd.to_datetime(df_operador['data_recebimento'])
+                            flutuantes_por_data = df_operador.groupby('data_recebimento').size().reset_index(name='quantidade')
+                            
+                            fig = px.line(
+                                flutuantes_por_data,
+                                x='data_recebimento',
+                                y='quantidade',
+                                title=f'Flutuantes por Data - {operador_selecionado}',
+                                labels={'data_recebimento': 'Data', 'quantidade': 'Quantidade de Flutuantes'}
+                            )
+                            
+                            fig.update_layout(
+                                xaxis_title="Data",
+                                yaxis_title="Quantidade de Flutuantes",
+                                height=400
+                            )
+                            
+                            st.plotly_chart(fig, use_container_width=True)
+                        
+                        # Gráfico de taxa de encontrados
+                        if dados_operador['Total Flutuantes'] > 0:
+                            encontrados = dados_operador['Encontrados']
+                            nao_encontrados = dados_operador['Total Flutuantes'] - dados_operador['Encontrados']
+                            
+                            fig_pizza = px.pie(
+                                values=[encontrados, nao_encontrados],
+                                names=['Encontrados', 'Não Encontrados'],
+                                title=f'Taxa de Encontrados - {operador_selecionado}',
+                                color_discrete_map={'Encontrados': '#00ff00', 'Não Encontrados': '#ff0000'}
+                            )
+                            
+                            st.plotly_chart(fig_pizza, use_container_width=True)
             
-            # Aplicar negrito nos nomes dos operadores
-            fig.update_xaxes(
-                ticktext=[f"<b>{nome}</b>" for nome in df_ranking.head(15)['operador_real']],
-                tickvals=list(range(len(df_ranking.head(15))))
-            )
+            # Gráficos comparativos
+            st.markdown("### 📊 Análises Comparativas")
             
-            # Configurar rótulos de dados
-            fig.update_traces(
-                textposition='outside',
-                textfont_size=12,
-                texttemplate='%{text}'
-            )
+            col1, col2 = st.columns(2)
             
-            st.plotly_chart(fig, use_container_width=True)
-            
-            # Gráfico de taxa de encontrados
-            st.markdown("### 📊 Taxa de Pacotes Encontrados por Operador")
-            
-            fig2 = px.bar(
-                df_ranking.head(15),
-                x='operador_real',
-                y='taxa_encontrados',
-                title='Taxa de Pacotes Encontrados (Top 15)',
-                labels={'operador_real': 'Operador', 'taxa_encontrados': 'Taxa de Encontrados (%)'},
-                color='taxa_encontrados',
-                color_continuous_scale='Greens',
-                text='taxa_encontrados'  # Adicionar rótulos de dados
-            )
-            
-            # Melhorar visualização
-            fig2.update_layout(
-                xaxis_tickangle=-45,
-                font=dict(size=14),  # Aumentar fonte geral
-                title_font_size=18,  # Fonte do título
-                xaxis_title_font_size=16,  # Fonte do eixo X
-                yaxis_title_font_size=16,  # Fonte do eixo Y
-                height=500,  # Aumentar altura
-                xaxis=dict(
-                    tickfont=dict(size=12, color='black'),
-                    tickangle=-45
+            with col1:
+                # Top 10 por total de flutuantes
+                fig_top10 = px.bar(
+                    ranking_evolucao.head(10),
+                    x='operador_real',
+                    y='total_flutuantes',
+                    title='Top 10 - Total de Flutuantes',
+                    labels={'operador_real': 'Operador', 'total_flutuantes': 'Total de Flutuantes'},
+                    color='total_flutuantes',
+                    color_continuous_scale='Reds'
                 )
-            )
+                
+                fig_top10.update_layout(
+                    xaxis_tickangle=-45,
+                    height=400
+                )
+                
+                st.plotly_chart(fig_top10, use_container_width=True)
             
-            # Aplicar negrito nos nomes dos operadores
-            fig2.update_xaxes(
-                ticktext=[f"<b>{nome}</b>" for nome in df_ranking.head(15)['operador_real']],
-                tickvals=list(range(len(df_ranking.head(15))))
-            )
+            with col2:
+                # Top 10 por taxa de encontrados
+                fig_taxa = px.bar(
+                    ranking_evolucao.head(10),
+                    x='operador_real',
+                    y='taxa_encontrados',
+                    title='Top 10 - Taxa de Encontrados (%)',
+                    labels={'operador_real': 'Operador', 'taxa_encontrados': 'Taxa de Encontrados (%)'},
+                    color='taxa_encontrados',
+                    color_continuous_scale='Greens'
+                )
+                
+                fig_taxa.update_layout(
+                    xaxis_tickangle=-45,
+                    height=400
+                )
+                
+                st.plotly_chart(fig_taxa, use_container_width=True)
             
-            # Configurar rótulos de dados
-            fig2.update_traces(
-                textposition='outside',
-                textfont_size=12,
-                texttemplate='%{text:.1f}%'
-            )
+            # Gráfico de flutuantes recentes
+            st.markdown("### 🚨 Operadores com Flutuantes Recentes (Últimos 7 dias)")
             
-            st.plotly_chart(fig2, use_container_width=True)
+            df_recentes_ranking = ranking_evolucao[ranking_evolucao['flutuantes_recentes'] > 0].sort_values('flutuantes_recentes', ascending=False)
             
+            if not df_recentes_ranking.empty:
+                fig_recentes = px.bar(
+                    df_recentes_ranking,
+                    x='operador_real',
+                    y='flutuantes_recentes',
+                    title='Flutuantes nos Últimos 7 Dias',
+                    labels={'operador_real': 'Operador', 'flutuantes_recentes': 'Flutuantes Recentes'},
+                    color='flutuantes_recentes',
+                    color_continuous_scale='Oranges',
+                    text='flutuantes_recentes'
+                )
+                
+                fig_recentes.update_layout(
+                    xaxis_tickangle=-45,
+                    height=400
+                )
+                
+                fig_recentes.update_traces(
+                    textposition='outside',
+                    textfont_size=12
+                )
+                
+                st.plotly_chart(fig_recentes, use_container_width=True)
+            else:
+                st.success("🎉 **Excelente!** Nenhum operador teve flutuantes nos últimos 7 dias!")
+            
+            # Tabela detalhada dos flutuantes
+            st.markdown("### 📋 Detalhamento dos Flutuantes")
+            st.markdown("Tabela completa com todos os flutuantes encontrados nos filtros aplicados, ordenados por data (mais recente primeiro).")
+            
+            # Preparar dados para exibição
+            df_detalhamento = df_flutuantes_ranking.copy()
+            
+            # Ordenar por data de recebimento (mais recente primeiro)
+            df_detalhamento = df_detalhamento.sort_values('data_recebimento', ascending=False)
+            
+            # Formatar dados para melhor visualização
+            df_display_detalhes = df_detalhamento.copy()
+            
+            # Formatar data de recebimento
+            if 'data_recebimento' in df_display_detalhes.columns:
+                df_display_detalhes['data_recebimento'] = pd.to_datetime(df_display_detalhes['data_recebimento'], errors='coerce').dt.strftime('%d/%m/%Y')
+            
+            # Formatar data de importação
+            if 'importado_em' in df_display_detalhes.columns:
+                df_display_detalhes['importado_em'] = pd.to_datetime(df_display_detalhes['importado_em'], errors='coerce').dt.strftime('%d/%m/%Y %H:%M')
+            
+            # Adicionar status visual para foi_encontrado
+            if 'foi_encontrado' in df_display_detalhes.columns:
+                df_display_detalhes['status_encontrado'] = df_display_detalhes['foi_encontrado'].apply(
+                    lambda x: '✅ Encontrado' if x else '❌ Não Encontrado'
+                )
+            
+            # Adicionar status visual para foi_expedido
+            if 'foi_expedido' in df_display_detalhes.columns:
+                df_display_detalhes['status_expedido'] = df_display_detalhes['foi_expedido'].apply(
+                    lambda x: '📦 Expedido' if x else '⏳ Não Expedido'
+                )
+            
+            # Adicionar classificação do aging
+            if 'aging' in df_display_detalhes.columns:
+                df_display_detalhes['aging_status'] = df_display_detalhes['aging'].apply(
+                    lambda x: f"{x} dias - {'🔴 Crítico' if x > 15 else '🟡 Atenção' if x > 7 else '🟢 Normal'}"
+                )
+            
+            # Selecionar e renomear colunas para exibição
+            colunas_detalhamento = {
+                'data_recebimento': 'Data Recebimento',
+                'operador_real': 'Operador',
+                'tracking_number': 'Tracking Number',
+                'destino': 'Destino',
+                'aging_status': 'Aging',
+                'status_encontrado': 'Status Encontrado',
+                'status_expedido': 'Status Expedido',
+                'estacao': 'Estação',
+                'descricao_item': 'Descrição do Item',
+                'status_spx': 'Status SPX',
+                'importado_em': 'Importado em'
+            }
+            
+            # Verificar quais colunas existem e aplicar renomeação
+            colunas_existentes = {k: v for k, v in colunas_detalhamento.items() if k in df_display_detalhes.columns}
+            df_final = df_display_detalhes[list(colunas_existentes.keys())].rename(columns=colunas_existentes)
+            
+            # Métricas do detalhamento
+            col1, col2, col3, col4 = st.columns(4)
+            
+            with col1:
+                total_registros = len(df_final)
+                st.metric("Total de Flutuantes", f"{total_registros:,}")
+            
+            with col2:
+                if 'Status Encontrado' in df_final.columns:
+                    encontrados = len(df_final[df_final['Status Encontrado'] == '✅ Encontrado'])
+                    st.metric("Encontrados", f"{encontrados}")
+            
+            with col3:
+                if 'Status Expedido' in df_final.columns:
+                    expedidos = len(df_final[df_final['Status Expedido'] == '📦 Expedido'])
+                    st.metric("Expedidos", f"{expedidos}")
+            
+            with col4:
+                if 'Aging' in df_final.columns:
+                    aging_medio = df_detalhamento['aging'].mean()
+                    st.metric("Aging Médio", f"{aging_medio:.1f} dias")
+            
+            # Filtros adicionais para a tabela
+            with st.expander("🔧 Filtros Adicionais para Tabela"):
+                col_filtro1, col_filtro2, col_filtro3 = st.columns(3)
+                
+                with col_filtro1:
+                    filtro_encontrado = st.selectbox(
+                        "Status Encontrado:",
+                        options=["Todos", "✅ Encontrado", "❌ Não Encontrado"],
+                        key="filtro_encontrado_detalhes"
+                    )
+                
+                with col_filtro2:
+                    filtro_expedido = st.selectbox(
+                        "Status Expedido:",
+                        options=["Todos", "📦 Expedido", "⏳ Não Expedido"],
+                        key="filtro_expedido_detalhes"
+                    )
+                
+                with col_filtro3:
+                    if 'Estação' in df_final.columns:
+                        estacoes_disponiveis = ["Todas"] + sorted(df_final['Estação'].dropna().unique().tolist())
+                        filtro_estacao = st.selectbox(
+                            "Estação:",
+                            options=estacoes_disponiveis,
+                            key="filtro_estacao_detalhes"
+                        )
+                    else:
+                        filtro_estacao = "Todas"
+                
+                # Aplicar filtros adicionais
+                df_filtrado = df_final.copy()
+                
+                if filtro_encontrado != "Todos" and 'Status Encontrado' in df_filtrado.columns:
+                    df_filtrado = df_filtrado[df_filtrado['Status Encontrado'] == filtro_encontrado]
+                
+                if filtro_expedido != "Todos" and 'Status Expedido' in df_filtrado.columns:
+                    df_filtrado = df_filtrado[df_filtrado['Status Expedido'] == filtro_expedido]
+                
+                if filtro_estacao != "Todas" and 'Estação' in df_filtrado.columns:
+                    df_filtrado = df_filtrado[df_filtrado['Estação'] == filtro_estacao]
+                
+                if len(df_filtrado) != len(df_final):
+                    st.info(f"📊 Filtros aplicados: {len(df_filtrado)} de {len(df_final)} registros")
+            
+            # Se não há filtros, usar dados completos
+            if 'df_filtrado' not in locals():
+                df_filtrado = df_final
+            
+            # Exibir tabela
+            if not df_filtrado.empty:
+                st.dataframe(
+                    df_filtrado,
+                    use_container_width=True,
+                    height=400  # Altura fixa para melhor visualização
+                )
+                
+                # Botão para exportar detalhamento
+                if st.button("📥 Exportar Detalhamento para Excel", key="export_detalhamento"):
+                    nome_arquivo = f"detalhamento_flutuantes_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+                    
+                    # Usar dados originais para exportação (com tipos corretos)
+                    df_export = df_detalhamento.copy()
+                    if 'data_recebimento' in df_export.columns:
+                        df_export['data_recebimento'] = pd.to_datetime(df_export['data_recebimento'], errors='coerce')
+                    
+                    try:
+                        with pd.ExcelWriter(nome_arquivo, engine='xlsxwriter') as writer:
+                            df_export.to_excel(writer, sheet_name='Detalhamento Flutuantes', index=False)
+                        
+                        # Ler arquivo para download
+                        with open(nome_arquivo, 'rb') as f:
+                            st.download_button(
+                                label="💾 Download Excel - Detalhamento",
+                                data=f.read(),
+                                file_name=nome_arquivo,
+                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                key="download_detalhamento"
+                            )
+                        
+                        # Limpar arquivo temporário
+                        import os
+                        os.remove(nome_arquivo)
+                        
+                    except Exception as e:
+                        st.error(f"❌ Erro ao gerar arquivo Excel: {e}")
+            else:
+                st.warning("⚠️ Nenhum registro encontrado com os filtros aplicados.")
+        
         else:
-            st.info("📝 Nenhum dado de ranking disponível. Importe dados primeiro.")
+            st.warning("⚠️ Nenhum dado encontrado para os filtros selecionados.")
     
     with tab3:
         st.markdown("### 📋 Dados Completos de Pacotes Flutuantes")
@@ -1886,10 +2447,10 @@ elif selected == "📦 Pacotes Flutuantes":
             
             # Converter datas
             if 'data_recebimento' in df_display.columns:
-                df_display['data_recebimento'] = pd.to_datetime(df_display['data_recebimento']).dt.strftime('%d/%m/%Y')
+                df_display['data_recebimento'] = pd.to_datetime(df_display['data_recebimento'], errors='coerce').dt.strftime('%d/%m/%Y')
             
             if 'importado_em' in df_display.columns:
-                df_display['importado_em'] = pd.to_datetime(df_display['importado_em']).dt.strftime('%d/%m/%Y %H:%M')
+                df_display['importado_em'] = pd.to_datetime(df_display['importado_em'], errors='coerce').dt.strftime('%d/%m/%Y %H:%M')
             
             # Renomear colunas
             df_display = df_display.rename(columns={
@@ -2087,7 +2648,7 @@ elif selected == "📋 Histórico":
         # Tabela completa
         st.markdown("### 📊 Dados Completos")
         df_display = df_historico.copy()
-        df_display['data'] = df_display['data'].dt.strftime('%d/%m/%Y')
+        df_display['data'] = pd.to_datetime(df_display['data'], errors='coerce').dt.strftime('%d/%m/%Y')
         st.dataframe(df_display, use_container_width=True)
         
         # Botão para exportar

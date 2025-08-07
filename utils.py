@@ -3,6 +3,8 @@ import streamlit as st
 from datetime import datetime
 import json
 import os
+import re
+import unicodedata
 from config import DADOS, MENSAGENS
 
 # Importação condicional do database para evitar erros
@@ -625,6 +627,21 @@ def carregar_pacotes_flutuantes(limit: int = 1000, operador_real: str = None, da
         st.error(f"❌ Erro ao carregar pacotes flutuantes: {e}")
         return pd.DataFrame()
 
+def carregar_pacotes_flutuantes_multiplos_operadores(limit: int = 1000, operadores_reais: list = None, data_inicio: str = None, data_fim: str = None) -> pd.DataFrame:
+    """
+    Carrega dados de pacotes flutuantes do banco de dados com suporte a múltiplos operadores
+    """
+    try:
+        if DB_AVAILABLE and db_manager.is_connected():
+            return db_manager.load_pacotes_flutuantes_multiplos_operadores(limit, operadores_reais, data_inicio, data_fim)
+        else:
+            st.warning("⚠️ Supabase não conectado.")
+            return pd.DataFrame()
+            
+    except Exception as e:
+        st.error(f"❌ Erro ao carregar pacotes flutuantes: {e}")
+        return pd.DataFrame()
+
 def obter_ranking_operadores_flutuantes() -> pd.DataFrame:
     """
     Obtém ranking de operadores com mais flutuantes
@@ -881,3 +898,288 @@ def processar_multiplos_csvs_dados_diarios(uploaded_files):
     else:
         st.error("❌ Nenhum arquivo foi processado com sucesso.")
         return None 
+
+def extrair_codigo_operador(nome_operador):
+    """
+    Extrai o código do operador do formato [ops67892]NOME
+    """
+    if pd.isna(nome_operador) or not isinstance(nome_operador, str):
+        return None
+    
+    # Procurar padrão [opsXXXX] no início do nome
+    match = re.match(r'\[([^\]]+)\]', nome_operador.strip())
+    if match:
+        return match.group(1).lower()  # Retorna o código em lowercase
+    return None
+
+def normalizar_nome_operador(nome_operador):
+    """
+    Normaliza o nome do operador removendo acentos e caracteres especiais
+    """
+    if pd.isna(nome_operador) or not isinstance(nome_operador, str):
+        return nome_operador
+    
+    # Extrair apenas a parte do nome (após o código)
+    codigo_match = re.match(r'\[([^\]]+)\](.+)', nome_operador.strip())
+    if codigo_match:
+        codigo = codigo_match.group(1)
+        nome = codigo_match.group(2).strip()
+        
+        # Normalizar o nome removendo acentos
+        nome_normalizado = unicodedata.normalize('NFKD', nome)
+        nome_normalizado = ''.join([c for c in nome_normalizado if not unicodedata.combining(c)])
+        
+        # Capitalizar corretamente
+        nome_normalizado = ' '.join([palavra.capitalize() for palavra in nome_normalizado.split()])
+        
+        return f"[{codigo}]{nome_normalizado}"
+    
+    return nome_operador
+
+def agrupar_operadores_duplicados(df):
+    """
+    Agrupa operadores duplicados com base no código identificador
+    """
+    if df.empty or 'operador_real' not in df.columns:
+        return df
+    
+    # Criar cópia para não modificar o original
+    df_agrupado = df.copy()
+    
+    # Extrair códigos e normalizar nomes
+    df_agrupado['codigo_operador'] = df_agrupado['operador_real'].apply(extrair_codigo_operador)
+    df_agrupado['operador_normalizado'] = df_agrupado['operador_real'].apply(normalizar_nome_operador)
+    
+    # Criar mapeamento de operadores duplicados
+    operadores_com_codigo = df_agrupado[df_agrupado['codigo_operador'].notna()]
+    
+    if not operadores_com_codigo.empty:
+        # Encontrar o nome "principal" para cada código (o mais comum ou o normalizado)
+        nome_principal_por_codigo = operadores_com_codigo.groupby('codigo_operador')['operador_normalizado'].agg(
+            lambda x: x.value_counts().index[0] if len(x.value_counts()) > 0 else x.iloc[0]
+        ).to_dict()
+        
+        # Mapear todos os nomes variantes para o nome principal
+        df_agrupado['operador_final'] = df_agrupado.apply(lambda row: 
+            nome_principal_por_codigo.get(row['codigo_operador'], row['operador_real'])
+            if row['codigo_operador'] is not None 
+            else row['operador_real'], axis=1
+        )
+        
+        # Substituir a coluna original
+        df_agrupado['operador_real'] = df_agrupado['operador_final']
+        
+        # Remover colunas auxiliares
+        df_agrupado = df_agrupado.drop(['codigo_operador', 'operador_normalizado', 'operador_final'], axis=1)
+    
+    return df_agrupado
+
+def obter_estatisticas_duplicacao_operadores(df):
+    """
+    Retorna estatísticas sobre operadores duplicados encontrados
+    """
+    if df.empty or 'operador_real' not in df.columns:
+        return {}
+    
+    # Extrair códigos
+    df_temp = df.copy()
+    df_temp['codigo_operador'] = df_temp['operador_real'].apply(extrair_codigo_operador)
+    
+    # Contar operadores únicos vs códigos únicos
+    operadores_com_codigo = df_temp[df_temp['codigo_operador'].notna()]
+    
+    if operadores_com_codigo.empty:
+        return {
+            'total_operadores_unicos': df['operador_real'].nunique(),
+            'operadores_com_codigo': 0,
+            'codigos_unicos': 0,
+            'duplicados_encontrados': 0
+        }
+    
+    # Encontrar duplicados
+    duplicados_por_codigo = operadores_com_codigo.groupby('codigo_operador')['operador_real'].nunique()
+    duplicados_encontrados = duplicados_por_codigo[duplicados_por_codigo > 1]
+    
+    return {
+        'total_operadores_unicos': df['operador_real'].nunique(),
+        'operadores_com_codigo': operadores_com_codigo['operador_real'].nunique(),
+        'codigos_unicos': operadores_com_codigo['codigo_operador'].nunique(),
+        'duplicados_encontrados': len(duplicados_encontrados),
+        'detalhes_duplicados': duplicados_encontrados.to_dict() if len(duplicados_encontrados) > 0 else {}
+    } 
+
+def diagnosticar_operador(df, nome_busca):
+    """
+    Diagnostica problemas com um operador específico
+    """
+    if df.empty or 'operador_real' not in df.columns:
+        return {
+            'erro': 'DataFrame vazio ou sem coluna operador_real',
+            'operadores_encontrados': []
+        }
+    
+    # Buscar operadores que contenham o nome
+    operadores_similar = df[df['operador_real'].str.contains(nome_busca, case=False, na=False)]['operador_real'].unique()
+    
+    # Buscar operadores com códigos similares
+    df_temp = df.copy()
+    df_temp['codigo_operador'] = df_temp['operador_real'].apply(extrair_codigo_operador)
+    df_temp['nome_sem_codigo'] = df_temp['operador_real'].apply(lambda x: 
+        re.sub(r'\[[^\]]+\]', '', str(x)).strip() if pd.notna(x) else ''
+    )
+    
+    # Buscar por nome sem código
+    nomes_similar = df_temp[df_temp['nome_sem_codigo'].str.contains(nome_busca, case=False, na=False)]['operador_real'].unique()
+    
+    # Todos os operadores únicos
+    todos_operadores = sorted(df['operador_real'].dropna().unique())
+    
+    # Estatísticas do operador se encontrado
+    dados_operador = {}
+    for op in set(list(operadores_similar) + list(nomes_similar)):
+        dados_op = df[df['operador_real'] == op]
+        if not dados_op.empty:
+            dados_operador[op] = {
+                'total_registros': len(dados_op),
+                'total_flutuantes': len(dados_op),
+                'encontrados': dados_op['foi_encontrado'].sum() if 'foi_encontrado' in dados_op.columns else 0,
+                'datas': {
+                    'primeira': dados_op['data_recebimento'].min() if 'data_recebimento' in dados_op.columns else None,
+                    'ultima': dados_op['data_recebimento'].max() if 'data_recebimento' in dados_op.columns else None
+                }
+            }
+    
+    return {
+        'nome_buscado': nome_busca,
+        'operadores_exatos': list(operadores_similar),
+        'operadores_similares': list(nomes_similar),
+        'total_operadores_base': len(todos_operadores),
+        'dados_operadores': dados_operador,
+        'primeiros_10_operadores': todos_operadores[:10],
+        'operadores_com_monica': [op for op in todos_operadores if 'monica' in op.lower()],
+        'todos_operadores_unicos': todos_operadores
+    }
+
+def verificar_normalizacao_operador(nome_original):
+    """
+    Verifica como um nome de operador seria normalizado
+    """
+    return {
+        'nome_original': nome_original,
+        'codigo_extraido': extrair_codigo_operador(nome_original),
+        'nome_normalizado': normalizar_nome_operador(nome_original)
+    }
+
+def buscar_operadores_por_padrao(df, padrao):
+    """
+    Busca operadores usando diferentes padrões
+    """
+    if df.empty or 'operador_real' not in df.columns:
+        return []
+    
+    resultados = []
+    
+    # Busca exata
+    exatos = df[df['operador_real'] == padrao]['operador_real'].unique()
+    resultados.extend([('exato', op) for op in exatos])
+    
+    # Busca case-insensitive
+    case_insensitive = df[df['operador_real'].str.lower() == padrao.lower()]['operador_real'].unique()
+    resultados.extend([('case_insensitive', op) for op in case_insensitive if op not in exatos])
+    
+    # Busca com contains
+    contains = df[df['operador_real'].str.contains(padrao, case=False, na=False)]['operador_real'].unique()
+    resultados.extend([('contains', op) for op in contains if op not in [x[1] for x in resultados]])
+    
+    # Busca por partes (sem código)
+    sem_codigo = df['operador_real'].apply(lambda x: re.sub(r'\[[^\]]+\]', '', str(x)).strip() if pd.notna(x) else '')
+    por_partes = df[sem_codigo.str.contains(padrao, case=False, na=False)]['operador_real'].unique()
+    resultados.extend([('sem_codigo', op) for op in por_partes if op not in [x[1] for x in resultados]])
+    
+    return resultados 
+
+def criar_mapeamento_operadores_originais(df):
+    """
+    Cria mapeamento de operadores normalizados para seus nomes originais no banco
+    """
+    if df.empty or 'operador_real' not in df.columns:
+        return {}
+    
+    mapeamento = {}
+    operadores_originais = df['operador_real'].dropna().unique()
+    
+    for operador_original in operadores_originais:
+        # Normalizar o nome
+        operador_normalizado = normalizar_nome_operador(operador_original)
+        
+        # Mapear normalizado -> original
+        if operador_normalizado != operador_original:
+            mapeamento[operador_normalizado] = operador_original
+        
+        # Também mapear o código para facilitar busca
+        codigo = extrair_codigo_operador(operador_original)
+        if codigo:
+            # Mapear variações possíveis do mesmo código
+            base_nome = re.sub(r'\[[^\]]+\]', '', operador_original).strip()
+            for variacao in [base_nome.lower(), base_nome.upper(), base_nome.title()]:
+                nome_variacao = f"[{codigo}]{variacao}"
+                if nome_variacao != operador_original:
+                    mapeamento[nome_variacao] = operador_original
+    
+    return mapeamento
+
+def mapear_operadores_para_banco(operadores_selecionados, df_original):
+    """
+    Mapeia operadores normalizados/selecionados para nomes reais no banco
+    """
+    if not operadores_selecionados:
+        return []
+    
+    # Criar mapeamento
+    mapeamento = criar_mapeamento_operadores_originais(df_original)
+    
+    operadores_mapeados = []
+    for operador in operadores_selecionados:
+        # Verificar se precisa mapear
+        if operador in mapeamento:
+            operador_real = mapeamento[operador]
+            operadores_mapeados.append(operador_real)
+            st.info(f"🔄 Mapeado: '{operador}' → '{operador_real}'")
+        else:
+            # Usar o operador como está
+            operadores_mapeados.append(operador)
+    
+    return operadores_mapeados
+
+def carregar_pacotes_flutuantes_com_mapeamento(limit: int = 1000, operadores_reais: list = None, data_inicio: str = None, data_fim: str = None) -> pd.DataFrame:
+    """
+    Carrega pacotes flutuantes com mapeamento automático de operadores
+    """
+    try:
+        if not DB_AVAILABLE or not db_manager.is_connected():
+            st.warning("⚠️ Supabase não conectado.")
+            return pd.DataFrame()
+        
+        # Se há operadores selecionados, fazer mapeamento primeiro
+        if operadores_reais and len(operadores_reais) > 0:
+            # Carregar dados completos para criar mapeamento
+            st.info("🔍 Carregando dados para mapeamento de operadores...")
+            df_completo = db_manager.load_pacotes_flutuantes(10000, None, None, None)
+            
+            if not df_completo.empty:
+                # Mapear operadores selecionados para nomes reais no banco
+                operadores_mapeados = mapear_operadores_para_banco(operadores_reais, df_completo)
+                st.success(f"✅ Operadores mapeados: {operadores_mapeados}")
+                
+                # Usar função de múltiplos operadores com nomes mapeados
+                return db_manager.load_pacotes_flutuantes_multiplos_operadores(limit, operadores_mapeados, data_inicio, data_fim)
+            else:
+                st.error("❌ Não foi possível carregar dados para mapeamento")
+                return pd.DataFrame()
+        else:
+            # Sem filtro de operadores, usar função normal
+            return db_manager.load_pacotes_flutuantes(limit, None, data_inicio, data_fim)
+            
+    except Exception as e:
+        st.error(f"❌ Erro ao carregar pacotes flutuantes com mapeamento: {e}")
+        return pd.DataFrame() 
