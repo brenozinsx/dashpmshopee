@@ -144,7 +144,9 @@ Thumbs.db
 # Project specific
 *.xlsx
 *.csv
+!exemplo_dados_diarios.csv
 *.json
+!dados_operacao.json
 backup_*.json
 *.log
 temp/

@@ -27,7 +27,8 @@ from utils import (
     carregar_dados_validacao, salvar_flutuantes_operador, carregar_flutuantes_operador,
     sincronizar_dados_locais, obter_estatisticas_banco, processar_csv_flutuantes,
     salvar_pacotes_flutuantes, carregar_pacotes_flutuantes, obter_ranking_operadores_flutuantes,
-    obter_resumo_flutuantes_estacao, obter_total_flutuantes_por_data, exportar_flutuantes_excel
+    obter_resumo_flutuantes_estacao, obter_total_flutuantes_por_data, exportar_flutuantes_excel,
+    processar_csv_dados_diarios, processar_multiplos_csvs_dados_diarios
 )
 
 # Sistema de mensagens temporárias
@@ -407,7 +408,7 @@ if selected == "📊 Dashboard Manual":
         dados_locais = load_data()
         
         # Criar abas para inserção e atualização
-        tab1, tab2 = st.tabs(["➕ Inserir Novo", "✏️ Atualizar Existente"])
+        tab1, tab2, tab3 = st.tabs(["➕ Inserir Novo", "✏️ Atualizar Existente", "📁 Importar CSV"])
         
         with tab1:
             st.markdown("### ➕ Inserir Novos Dados")
@@ -644,6 +645,187 @@ if selected == "📊 Dashboard Manual":
                             )
             else:
                 show_temp_message("Nenhum dado encontrado para atualizar. Adicione dados primeiro na aba 'Inserir Novo'.", "info", 10)
+        
+        with tab3:
+            st.markdown("### 📁 Importar Dados via CSV")
+            st.markdown("**Importe dados diários de operação através de arquivo CSV**")
+            
+            # Informações sobre o formato esperado
+            with st.expander("📋 Formato do CSV Esperado"):
+                st.markdown("""
+                **O arquivo CSV deve conter as seguintes colunas:**
+                
+                | Coluna no CSV | Campo no Sistema | Descrição |
+                |---------------|------------------|-----------|
+                | `Data` | Data | Data da operação (DD/MM/YYYY ou YYYY-MM-DD) |
+                | `quantidade de pacotes` | Volume do Veículo | Pacotes do dia |
+                | `backlog` | Backlog | Pacotes de dias anteriores |
+                | `flutuantes` | Pacotes Flutuantes | Sem bipar |
+                | `encontrados` | Flutuantes Revertidos | Encontrados |
+                | `erros segundo sorting` | Erros de 2º Sorting | Gaiola errada |
+                | `Erros etiquetagem` | Erros de Etiquetagem | Erros de etiquetagem |
+                
+                **Exemplo de CSV (formato brasileiro):**
+                ```csv
+                Data,quantidade de pacotes,backlog,flutuantes,encontrados,erros segundo sorting,Erros etiquetagem
+                15/01/2024,1500,200,15,8,3,2
+                16/01/2024,1600,150,12,6,4,1
+                ```
+                
+                **Nota**: O sistema aceita tanto formato brasileiro (DD/MM/YYYY) quanto formato ISO (YYYY-MM-DD).
+                """)
+            
+            # Opção de upload único ou múltiplo
+            upload_mode_csv = st.radio(
+                "Escolha o modo de upload:",
+                ["📁 Upload Único", "📚 Upload Múltiplo"],
+                horizontal=True,
+                key="upload_mode_csv"
+            )
+            
+            dados_csv_processados = None
+            
+            if upload_mode_csv == "📁 Upload Único":
+                # Upload do arquivo CSV único
+                uploaded_file_csv = st.file_uploader(
+                    "Escolha o arquivo CSV de dados diários", 
+                    type=['csv'],
+                    help="O arquivo deve conter as colunas: Data, quantidade de pacotes, backlog, flutuantes, encontrados, erros segundo sorting, Erros etiquetagem",
+                    key="upload_csv_unico"
+                )
+                
+                if uploaded_file_csv is not None:
+                    # Processar CSV único
+                    dados_csv_processados = processar_csv_dados_diarios(uploaded_file_csv)
+                    
+                    if dados_csv_processados is not None:
+                        st.success(f"✅ CSV processado com sucesso! {len(dados_csv_processados)} registros encontrados.")
+            
+            else:
+                # Upload múltiplo de arquivos CSV
+                uploaded_files_csv = st.file_uploader(
+                    "Escolha os arquivos CSV de dados diários (múltiplos)", 
+                    type=['csv'],
+                    accept_multiple_files=True,
+                    help="Selecione múltiplos arquivos CSV para consolidar os dados. Todos devem ter o mesmo formato.",
+                    key="upload_csv_multiplo"
+                )
+                
+                if uploaded_files_csv:
+                    if len(uploaded_files_csv) == 1:
+                        st.info("📝 Apenas um arquivo selecionado. Use o modo 'Upload Único' para melhor performance.")
+                    
+                    # Processar múltiplos CSVs
+                    dados_csv_processados = processar_multiplos_csvs_dados_diarios(uploaded_files_csv)
+            
+            # Se dados foram processados, mostrar opções de salvamento
+            if dados_csv_processados is not None:
+                st.markdown("### 📊 Dados Processados")
+                
+                # Mostrar preview dos dados
+                df_preview = pd.DataFrame(dados_csv_processados)
+                if 'arquivo_origem' in df_preview.columns:
+                    st.markdown("**Preview dos dados (primeiros 5 registros):**")
+                    st.dataframe(df_preview.head(5), use_container_width=True)
+                else:
+                    st.markdown("**Dados processados:**")
+                    st.dataframe(df_preview, use_container_width=True)
+                
+                # Estatísticas rápidas
+                col1, col2, col3, col4 = st.columns(4)
+                
+                with col1:
+                    st.metric("Total de Registros", len(dados_csv_processados))
+                
+                with col2:
+                    datas_unicas = len(set(d['data'] for d in dados_csv_processados))
+                    st.metric("Datas Únicas", datas_unicas)
+                
+                with col3:
+                    total_volume = sum(d['volume_diario'] for d in dados_csv_processados)
+                    st.metric("Volume Total", f"{total_volume:,}")
+                
+                with col4:
+                    total_flutuantes = sum(d['flutuantes'] for d in dados_csv_processados)
+                    st.metric("Total Flutuantes", total_flutuantes)
+                
+                # Opções de salvamento
+                st.markdown("### 💾 Opções de Salvamento")
+                
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    modo_salvamento_csv = st.radio(
+                        "Escolha o modo de salvamento:",
+                        ["🔄 Upsert (Atualizar + Inserir)", "➕ Apenas Inserir"],
+                        help="Upsert: atualiza registros existentes e adiciona novos. Apenas Inserir: adiciona todos como novos registros.",
+                        key="modo_salvamento_csv"
+                    )
+                
+                with col2:
+                    if st.button("💾 Salvar Dados CSV", type="primary", key="salvar_csv"):
+                        try:
+                            show_temp_message("Processando salvamento...", "info", 3)
+                            
+                            if "🔄 Upsert (Atualizar + Inserir)" in modo_salvamento_csv:
+                                # Modo upsert: verificar datas existentes e atualizar/inserir
+                                dados_finais = dados_locais.copy()
+                                
+                                for novo_dado in dados_csv_processados:
+                                    # Verificar se já existe dados para esta data
+                                    dados_existentes = [d for d in dados_finais if d['data'] == novo_dado['data']]
+                                    if dados_existentes:
+                                        # Atualizar dados existentes
+                                        for i, d in enumerate(dados_finais):
+                                            if d['data'] == novo_dado['data']:
+                                                dados_finais[i] = novo_dado
+                                                break
+                                        st.info(f"🔄 Atualizado dados para {novo_dado['data']}")
+                                    else:
+                                        # Inserir novos dados
+                                        dados_finais.append(novo_dado)
+                                        st.info(f"➕ Inserido novos dados para {novo_dado['data']}")
+                            else:
+                                # Modo apenas inserir: adicionar todos como novos
+                                dados_finais = dados_locais + dados_csv_processados
+                                st.info(f"➕ Adicionados {len(dados_csv_processados)} novos registros")
+                            
+                            # Salvar dados
+                            resultado_salvamento = save_data(dados_finais)
+                            
+                            if resultado_salvamento:
+                                show_temp_message("Dados CSV salvos com sucesso!", "success", 5)
+                                st.balloons()
+                                time.sleep(2)
+                                st.rerun()
+                            else:
+                                show_temp_message("Falha ao salvar dados CSV!", "error", 10)
+                                
+                        except Exception as e:
+                            show_temp_message(f"ERRO AO SALVAR DADOS CSV: {type(e).__name__} - {str(e)}", "error", 15)
+                
+                # Botão para exportar template CSV
+                if st.button("📥 Download Template CSV", key="download_template"):
+                    # Criar template CSV
+                    template_data = {
+                        'Data': ['15/01/2024', '16/01/2024'],
+                        'quantidade de pacotes': [1500, 1600],
+                        'backlog': [200, 150],
+                        'flutuantes': [15, 12],
+                        'encontrados': [8, 6],
+                        'erros segundo sorting': [3, 4],
+                        'Erros etiquetagem': [2, 1]
+                    }
+                    
+                    df_template = pd.DataFrame(template_data)
+                    csv_template = df_template.to_csv(index=False)
+                    
+                    st.download_button(
+                        label="💾 Download Template CSV",
+                        data=csv_template,
+                        file_name="template_dados_diarios.csv",
+                        mime="text/csv"
+                    )
 
     # Criar seção recolhível
     create_collapsible_section("📊 Input de Dados Diários", input_dados_content, default_expanded=True)
@@ -1031,7 +1213,9 @@ if selected == "📊 Dashboard Manual":
             else:
                 st.success("✅ **Excelente:** Erros de etiquetagem controlados")
 
-# ABA 2: Relatório CSV
+
+
+# ABA 3: Relatório CSV
 elif selected == "📈 Relatório CSV":
     st.markdown("## 📈 Relatório de Validação - Importação CSV")
     

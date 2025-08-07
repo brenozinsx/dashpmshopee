@@ -756,3 +756,128 @@ def exportar_flutuantes_excel(df: pd.DataFrame, nome_arquivo: str = "relatorio_f
     except Exception as e:
         st.error(f"Erro ao exportar dados: {e}")
         return None 
+
+# ============================================================================
+# FUNÇÕES PARA DADOS DIÁRIOS VIA CSV
+# ============================================================================
+
+def processar_csv_dados_diarios(uploaded_file):
+    """
+    Processa upload de CSV de dados diários de operação e retorna dados formatados
+    Mapeamento das colunas:
+    - Data -> data
+    - quantidade de pacotes -> volume_veiculo (pacotes do dia)
+    - backlog -> backlog (pacotes de dias anteriores)
+    - flutuantes -> flutuantes (sem bipar)
+    - encontrados -> flutuantes_revertidos (encontrados)
+    - erros segundo sorting -> erros_sorting (gaiola errada)
+    - Erros etiquetagem -> erros_etiquetagem
+    """
+    try:
+        if uploaded_file.name.endswith('.csv'):
+            df = pd.read_csv(uploaded_file)
+        else:
+            st.error("Formato de arquivo não suportado. Use .csv")
+            return None
+        
+        # Verificar se as colunas necessárias existem
+        colunas_necessarias = [
+            'Data', 'quantidade de pacotes', 'backlog', 'flutuantes', 
+            'encontrados', 'erros segundo sorting', 'Erros etiquetagem'
+        ]
+        
+        colunas_faltantes = [col for col in colunas_necessarias if col not in df.columns]
+        if colunas_faltantes:
+            st.error(f"Colunas obrigatórias não encontradas: {', '.join(colunas_faltantes)}")
+            st.info("Colunas esperadas: " + ", ".join(colunas_necessarias))
+            return None
+        
+        # Processar dados
+        dados_processados = []
+        for index, row in df.iterrows():
+            try:
+                # Converter data - tentar formato brasileiro primeiro (DD/MM/YYYY)
+                try:
+                    # Primeiro tenta formato brasileiro
+                    data = pd.to_datetime(row['Data'], format='%d/%m/%Y').strftime('%Y-%m-%d')
+                except:
+                    try:
+                        # Se falhar, tenta formato brasileiro com ano de 2 dígitos
+                        data = pd.to_datetime(row['Data'], format='%d/%m/%y').strftime('%Y-%m-%d')
+                    except:
+                        try:
+                            # Se falhar, tenta formato ISO (YYYY-MM-DD)
+                            data = pd.to_datetime(row['Data'], format='%Y-%m-%d').strftime('%Y-%m-%d')
+                        except:
+                            # Última tentativa: deixar o pandas tentar adivinhar
+                            data = pd.to_datetime(row['Data']).strftime('%Y-%m-%d')
+                
+                # Converter valores numéricos
+                quantidade_pacotes = int(row['quantidade de pacotes'])
+                backlog = int(row['backlog'])
+                flutuantes = int(row['flutuantes'])
+                encontrados = int(row['encontrados'])
+                erros_sorting = int(row['erros segundo sorting'])
+                erros_etiquetagem = int(row['Erros etiquetagem'])
+                
+                # Calcular volume diário total
+                volume_diario = backlog + quantidade_pacotes
+                
+                dados_processados.append({
+                    'data': data,
+                    'backlog': backlog,
+                    'volume_veiculo': quantidade_pacotes,
+                    'volume_diario': volume_diario,
+                    'flutuantes': flutuantes,
+                    'flutuantes_revertidos': encontrados,
+                    'erros_sorting': erros_sorting,
+                    'erros_etiquetagem': erros_etiquetagem
+                })
+                
+            except Exception as e:
+                st.warning(f"⚠️ Erro ao processar linha {index + 1}: {e}")
+                continue
+        
+        if not dados_processados:
+            st.error("❌ Nenhum dado válido encontrado após processamento")
+            return None
+        
+        # Mostrar exemplo de conversão de data para o usuário
+        if dados_processados:
+            primeira_data_original = df['Data'].iloc[0] if not df.empty else None
+            primeira_data_processada = dados_processados[0]['data'] if dados_processados else None
+            
+            if primeira_data_original and primeira_data_processada:
+                st.info(f"📅 **Exemplo de conversão de data:** `{primeira_data_original}` → `{primeira_data_processada}`")
+        
+        st.success(f"✅ CSV processado com sucesso! {len(dados_processados)} registros válidos")
+        return dados_processados
+        
+    except Exception as e:
+        st.error(f"❌ Erro ao processar arquivo CSV: {e}")
+        return None
+
+def processar_multiplos_csvs_dados_diarios(uploaded_files):
+    """Processa múltiplos arquivos CSV de dados diários e retorna uma lista consolidada"""
+    todos_dados = []
+    
+    for i, uploaded_file in enumerate(uploaded_files):
+        try:
+            dados = processar_csv_dados_diarios(uploaded_file)
+            if dados is not None:
+                # Adicionar identificador do arquivo
+                for dado in dados:
+                    dado['arquivo_origem'] = uploaded_file.name
+                todos_dados.extend(dados)
+                st.success(f"✅ {uploaded_file.name} processado com sucesso!")
+            else:
+                st.error(f"❌ Erro ao processar {uploaded_file.name}")
+        except Exception as e:
+            st.error(f"❌ Erro ao processar {uploaded_file.name}: {e}")
+    
+    if todos_dados:
+        st.success(f"🎉 **Consolidação concluída!** Total de {len(todos_dados)} registros de {len(uploaded_files)} arquivos.")
+        return todos_dados
+    else:
+        st.error("❌ Nenhum arquivo foi processado com sucesso.")
+        return None 
