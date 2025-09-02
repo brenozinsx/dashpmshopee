@@ -395,6 +395,16 @@ if selected == "📊 Dashboard Manual":
             show_temp_message("✅ Cache limpo! Dados recarregados.", "success")
             st.rerun()
     
+    # Botão para forçar uso de dados locais
+    with col2:
+        if st.button("💾 Forçar Dados Locais", type="secondary"):
+            st.cache_data.clear()
+            # Limpar dados do session_state se existirem
+            if 'dados_carregados' in st.session_state:
+                del st.session_state['dados_carregados']
+            show_temp_message("✅ Forçando uso de dados locais!", "success")
+            st.rerun()
+    
     # Carregar dados existentes
     dados = load_data()
     
@@ -844,14 +854,25 @@ if selected == "📊 Dashboard Manual":
         # Filtro por período de data
         st.markdown("#### 📅 Filtro por Período")
         
+        # Calcular data de início inteligente baseada nos dados disponíveis
+        if dados:
+            # Se há dados, usar a data mais antiga como início padrão
+            datas_disponiveis = [datetime.strptime(d['data'], '%Y-%m-%d').date() for d in dados]
+            data_inicio_padrao = min(datas_disponiveis)
+            data_fim_padrao = max(datas_disponiveis)
+        else:
+            # Se não há dados, usar padrão de 30 dias
+            data_inicio_padrao = datetime.now().date() - timedelta(days=30)
+            data_fim_padrao = datetime.now().date()
+        
         data_inicio = st.date_input(
             "Data Início",
-            value=datetime.now() - timedelta(days=30),
+            value=data_inicio_padrao,
             key="filtro_data_inicio"
         )
         data_fim = st.date_input(
             "Data Fim",
-            value=datetime.now(),
+            value=data_fim_padrao,
             key="filtro_data_fim"
         )
     
@@ -915,14 +936,22 @@ if selected == "📊 Dashboard Manual":
                 d for d in dados_filtrados 
                 if data_inicio <= datetime.strptime(d['data'], '%Y-%m-%d').date() <= data_fim
             ]
-            st.info(f"📅 Filtrado por período: {data_inicio.strftime('%d/%m/%Y')} a {data_fim.strftime('%d/%m/%Y')} ({len(dados_filtrados)} registros)")
+            if dados_filtrados:
+                st.info(f"📅 Filtrado por período: {data_inicio.strftime('%d/%m/%Y')} a {data_fim.strftime('%d/%m/%Y')} ({len(dados_filtrados)} registros)")
+            else:
+                st.warning(f"⚠️ Nenhum dado encontrado no período: {data_inicio.strftime('%d/%m/%Y')} a {data_fim.strftime('%d/%m/%Y')}")
+                st.info("💡 Dica: Ajuste o período ou selecione 'Todos os Dados' para ver os dados disponíveis")
     
     elif tipo_filtro == "📅 Semana do Ano" and semana_selecionada:
         dados_filtrados = [
             d for d in dados_filtrados 
             if semana_selecionada['inicio'].date() <= datetime.strptime(d['data'], '%Y-%m-%d').date() <= semana_selecionada['fim'].date()
         ]
-        st.info(f"📅 Filtrado por semana: {semana_selecionada['label']} ({len(dados_filtrados)} registros)")
+        if dados_filtrados:
+            st.info(f"📅 Filtrado por semana: {semana_selecionada['label']} ({len(dados_filtrados)} registros)")
+        else:
+            st.warning(f"⚠️ Nenhum dado encontrado na semana: {semana_selecionada['label']}")
+            st.info("💡 Dica: Selecione outra semana ou 'Todos os Dados' para ver os dados disponíveis")
     
     else:
         st.info(f"📊 Exibindo todos os dados ({len(dados_filtrados)} registros)")
@@ -932,6 +961,14 @@ if selected == "📊 Dashboard Manual":
         datas_filtradas = [datetime.strptime(d['data'], '%Y-%m-%d').date() for d in dados_filtrados]
         periodo_info = f"📅 Período: {min(datas_filtradas).strftime('%d/%m/%Y')} a {max(datas_filtradas).strftime('%d/%m/%Y')}"
         st.success(f"{periodo_info} | 📊 {len(dados_filtrados)} dias de dados")
+    else:
+        # Mostrar informações sobre todos os dados disponíveis
+        if dados:
+            datas_disponiveis = [datetime.strptime(d['data'], '%Y-%m-%d').date() for d in dados]
+            periodo_disponivel = f"📅 Dados disponíveis: {min(datas_disponiveis).strftime('%d/%m/%Y')} a {max(datas_disponiveis).strftime('%d/%m/%Y')}"
+            st.info(f"{periodo_disponivel} | 📊 {len(dados)} dias de dados | 💡 Ajuste os filtros para ver dados específicos")
+        else:
+            st.warning("📝 Nenhum dado disponível. Adicione dados usando o formulário acima.")
 
     # Calcular métricas com dados filtrados
     metricas = calcular_metricas(dados_filtrados)
@@ -1008,103 +1045,108 @@ if selected == "📊 Dashboard Manual":
 
     # Comparação com período anterior (se aplicável)
     if dados_filtrados and len(dados_filtrados) > 0 and len(dados) > len(dados_filtrados):
-        st.markdown("### 📈 Comparação com Período Anterior")
-        
-        # NOVA LÓGICA: Comparar por semana do ano em vez de período consecutivo
-        import pandas as pd
-        from datetime import datetime
-        
-        # Converter dados para DataFrame para facilitar análise
-        df_todos = pd.DataFrame(dados)
-        df_filtrados = pd.DataFrame(dados_filtrados)
-        
-        # Adicionar coluna de semana do ano
-        df_todos['data'] = pd.to_datetime(df_todos['data'])
-        df_filtrados['data'] = pd.to_datetime(df_filtrados['data'])
-        df_todos['semana_ano'] = df_todos['data'].dt.isocalendar().week
-        df_filtrados['semana_ano'] = df_filtrados['data'].dt.isocalendar().week
-        
-        # Identificar a semana do período atual
-        semanas_atual = sorted(df_filtrados['semana_ano'].unique())
-        semana_atual = semanas_atual[0] if len(semanas_atual) == 1 else f"{min(semanas_atual)}-{max(semanas_atual)}"
-        
-        # Buscar dados da semana anterior
-        dados_anteriores = []
-        if len(semanas_atual) == 1:
-            # Se todos os dados filtrados são da mesma semana
-            semana_anterior = semanas_atual[0] - 1
-            dados_semana_anterior = df_todos[df_todos['semana_ano'] == semana_anterior]
-            if not dados_semana_anterior.empty:
-                dados_anteriores = dados_semana_anterior.to_dict('records')
-        else:
-            # Se os dados filtrados abrangem múltiplas semanas, usar lógica anterior como fallback
-            dias_periodo_atual = len(dados_filtrados)
-            dados_anteriores = dados[:-dias_periodo_atual][-dias_periodo_atual:] if len(dados) >= dias_periodo_atual * 2 else []
-        
-        if dados_anteriores:
-            metricas_anteriores = calcular_metricas(dados_anteriores)
+        # Verificar se há dados suficientes para comparação
+        if len(dados) >= 2:  # Pelo menos 2 dias de dados
+            st.markdown("### 📈 Comparação com Período Anterior")
             
-            # Mostrar informações de debug sobre a comparação
+            # NOVA LÓGICA: Comparar por semana do ano em vez de período consecutivo
+            import pandas as pd
+            from datetime import datetime
+            
+            # Converter dados para DataFrame para facilitar análise
+            df_todos = pd.DataFrame(dados)
+            df_filtrados = pd.DataFrame(dados_filtrados)
+            
+            # Adicionar coluna de semana do ano
+            df_todos['data'] = pd.to_datetime(df_todos['data'])
+            df_filtrados['data'] = pd.to_datetime(df_filtrados['data'])
+            df_todos['semana_ano'] = df_todos['data'].dt.isocalendar().week
+            df_filtrados['semana_ano'] = df_filtrados['data'].dt.isocalendar().week
+            
+            # Identificar a semana do período atual
+            semanas_atual = sorted(df_filtrados['semana_ano'].unique())
+            semana_atual = semanas_atual[0] if len(semanas_atual) == 1 else f"{min(semanas_atual)}-{max(semanas_atual)}"
+            
+            # Buscar dados da semana anterior
+            dados_anteriores = []
             if len(semanas_atual) == 1:
+                # Se todos os dados filtrados são da mesma semana
                 semana_anterior = semanas_atual[0] - 1
-                st.info(f"📊 Comparando Semana {semanas_atual[0]} vs Semana {semana_anterior} (mesmo número de dias)")
+                dados_semana_anterior = df_todos[df_todos['semana_ano'] == semana_anterior]
+                if not dados_semana_anterior.empty:
+                    dados_anteriores = dados_semana_anterior.to_dict('records')
             else:
-                st.info(f"📊 Comparando período de {len(dados_filtrados)} dias vs período anterior equivalente")
+                # Se os dados filtrados abrangem múltiplas semanas, usar lógica anterior como fallback
+                dias_periodo_atual = len(dados_filtrados)
+                dados_anteriores = dados[:-dias_periodo_atual][-dias_periodo_atual:] if len(dados) >= dias_periodo_atual * 2 else []
             
-            col1, col2, col3, col4 = st.columns(4)
-            
-            with col1:
-                variacao_pacotes = ((metricas['total_pacotes'] - metricas_anteriores['total_pacotes']) / metricas_anteriores['total_pacotes'] * 100) if metricas_anteriores['total_pacotes'] > 0 else 0
-                st.metric(
-                    "📦 Volume Total",
-                    f"{metricas['total_pacotes']:,}",
-                    f"{variacao_pacotes:+.1f}%"
-                )
-            
-            with col2:
-                variacao_flutuantes = metricas['taxa_flutuantes'] - metricas_anteriores['taxa_flutuantes']
-                # Para taxa flutuantes: diminuição é boa (verde), aumento é ruim (vermelho)
-                cor_flutuantes = "green" if variacao_flutuantes < 0 else "red" if variacao_flutuantes > 0 else "gray"
-                seta_flutuantes = "↘️" if variacao_flutuantes < 0 else "↗️" if variacao_flutuantes > 0 else "➡️"
-                st.markdown(f"""
-                <div style="background: white; padding: 1rem; border-radius: 10px; border-left: 4px solid {cor_flutuantes}; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
-                    <div style="font-size: 0.9rem; color: #666; margin-bottom: 0.5rem;">🔴 Taxa Flutuantes</div>
-                    <div style="font-size: 1.5rem; font-weight: bold; color: #333;">{metricas['taxa_flutuantes']:.2f}%</div>
-                    <div style="font-size: 1rem; color: {cor_flutuantes}; font-weight: bold;">
-                        {seta_flutuantes} {variacao_flutuantes:+.2f}%
+            if dados_anteriores:
+                metricas_anteriores = calcular_metricas(dados_anteriores)
+                
+                # Mostrar informações de debug sobre a comparação
+                if len(semanas_atual) == 1:
+                    semana_anterior = semanas_atual[0] - 1
+                    st.info(f"📊 Comparando Semana {semanas_atual[0]} vs Semana {semana_anterior} (mesmo número de dias)")
+                else:
+                    st.info(f"📊 Comparando período de {len(dados_filtrados)} dias vs período anterior equivalente")
+                
+                col1, col2, col3, col4 = st.columns(4)
+                
+                with col1:
+                    variacao_pacotes = ((metricas['total_pacotes'] - metricas_anteriores['total_pacotes']) / metricas_anteriores['total_pacotes'] * 100) if metricas_anteriores['total_pacotes'] > 0 else 0
+                    st.metric(
+                        "📦 Volume Total",
+                        f"{metricas['total_pacotes']:,}",
+                        f"{variacao_pacotes:+.1f}%"
+                    )
+                
+                with col2:
+                    variacao_flutuantes = metricas['taxa_flutuantes'] - metricas_anteriores['taxa_flutuantes']
+                    # Para taxa flutuantes: diminuição é boa (verde), aumento é ruim (vermelho)
+                    cor_flutuantes = "green" if variacao_flutuantes < 0 else "red" if variacao_flutuantes > 0 else "gray"
+                    seta_flutuantes = "↘️" if variacao_flutuantes < 0 else "↗️" if variacao_flutuantes > 0 else "➡️"
+                    st.markdown(f"""
+                    <div style="background: white; padding: 1rem; border-radius: 10px; border-left: 4px solid {cor_flutuantes}; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+                        <div style="font-size: 0.9rem; color: #666; margin-bottom: 0.5rem;">🔴 Taxa Flutuantes</div>
+                        <div style="font-size: 1.5rem; font-weight: bold; color: #333;">{metricas['taxa_flutuantes']:.2f}%</div>
+                        <div style="font-size: 1rem; color: {cor_flutuantes}; font-weight: bold;">
+                            {seta_flutuantes} {variacao_flutuantes:+.2f}%
+                        </div>
                     </div>
-                </div>
-                """, unsafe_allow_html=True)
-            
-            with col3:
-                variacao_sorting = metricas['taxa_erros_sorting'] - metricas_anteriores['taxa_erros_sorting']
-                # Para taxa erros sorting: diminuição é boa (verde), aumento é ruim (vermelho)
-                cor_sorting = "green" if variacao_sorting < 0 else "red" if variacao_sorting > 0 else "gray"
-                seta_sorting = "↘️" if variacao_sorting < 0 else "↗️" if variacao_sorting > 0 else "➡️"
-                st.markdown(f"""
-                <div style="background: white; padding: 1rem; border-radius: 10px; border-left: 4px solid {cor_sorting}; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
-                    <div style="font-size: 0.9rem; color: #666; margin-bottom: 0.5rem;">🟠 Taxa Erros Sorting</div>
-                    <div style="font-size: 1.5rem; font-weight: bold; color: #333;">{metricas['taxa_erros_sorting']:.2f}%</div>
-                    <div style="font-size: 1rem; color: {cor_sorting}; font-weight: bold;">
-                        {seta_sorting} {variacao_sorting:+.2f}%
+                    """, unsafe_allow_html=True)
+                
+                with col3:
+                    variacao_sorting = metricas['taxa_erros_sorting'] - metricas_anteriores['taxa_erros_sorting']
+                    # Para taxa erros sorting: diminuição é boa (verde), aumento é ruim (vermelho)
+                    cor_sorting = "green" if variacao_sorting < 0 else "red" if variacao_sorting > 0 else "gray"
+                    seta_sorting = "↘️" if variacao_sorting < 0 else "↗️" if variacao_sorting > 0 else "➡️"
+                    st.markdown(f"""
+                    <div style="background: white; padding: 1rem; border-radius: 10px; border-left: 4px solid {cor_sorting}; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+                        <div style="font-size: 0.9rem; color: #666; margin-bottom: 0.5rem;">🟠 Taxa Erros Sorting</div>
+                        <div style="font-size: 1.5rem; font-weight: bold; color: #333;">{metricas['taxa_erros_sorting']:.2f}%</div>
+                        <div style="font-size: 1rem; color: {cor_sorting}; font-weight: bold;">
+                            {seta_sorting} {variacao_sorting:+.2f}%
+                        </div>
                     </div>
-                </div>
-                """, unsafe_allow_html=True)
-            
-            with col4:
-                variacao_etiquetagem = metricas['taxa_erros_etiquetagem'] - metricas_anteriores['taxa_erros_etiquetagem']
-                # Para taxa erros etiquetagem: diminuição é boa (verde), aumento é ruim (vermelho)
-                cor_etiquetagem = "green" if variacao_etiquetagem < 0 else "red" if variacao_etiquetagem > 0 else "gray"
-                seta_etiquetagem = "↘️" if variacao_etiquetagem < 0 else "↗️" if variacao_etiquetagem > 0 else "➡️"
-                st.markdown(f"""
-                <div style="background: white; padding: 1rem; border-radius: 10px; border-left: 4px solid {cor_etiquetagem}; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
-                    <div style="font-size: 0.9rem; color: #666; margin-bottom: 0.5rem;">⚫ Taxa Erros Etiquetagem</div>
-                    <div style="font-size: 1.5rem; font-weight: bold; color: #333;">{metricas['taxa_erros_etiquetagem']:.2f}%</div>
-                    <div style="font-size: 1rem; color: {cor_etiquetagem}; font-weight: bold;">
-                        {seta_etiquetagem} {variacao_etiquetagem:+.2f}%
+                    """, unsafe_allow_html=True)
+                
+                with col4:
+                    variacao_etiquetagem = metricas['taxa_erros_etiquetagem'] - metricas_anteriores['taxa_erros_etiquetagem']
+                    # Para taxa erros etiquetagem: diminuição é boa (verde), aumento é ruim (vermelho)
+                    cor_etiquetagem = "green" if variacao_etiquetagem < 0 else "red" if variacao_etiquetagem > 0 else "gray"
+                    seta_etiquetagem = "↘️" if variacao_etiquetagem < 0 else "↗️" if variacao_etiquetagem > 0 else "➡️"
+                    st.markdown(f"""
+                    <div style="background: white; padding: 1rem; border-radius: 10px; border-left: 4px solid {cor_etiquetagem}; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+                        <div style="font-size: 0.9rem; color: #666; margin-bottom: 0.5rem;">⚫ Taxa Erros Etiquetagem</div>
+                        <div style="font-size: 1.5rem; font-weight: bold; color: #333;">{metricas['taxa_erros_etiquetagem']:.2f}%</div>
+                        <div style="font-size: 1rem; color: {cor_etiquetagem}; font-weight: bold;">
+                            {seta_etiquetagem} {variacao_etiquetagem:+.2f}%
+                        </div>
                     </div>
-                </div>
-                """, unsafe_allow_html=True)
+                    """, unsafe_allow_html=True)
+        else:
+            st.info("📊 Comparação disponível apenas com pelo menos 2 dias de dados")
+        # Fechamento da condição len(dados) >= 2
 
     # Gráficos
     st.markdown("## 📊 Análise Temporal")

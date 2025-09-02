@@ -271,51 +271,102 @@ def salvar_dados_operacao(dados: list) -> bool:
 def carregar_dados_operacao() -> list:
     """
     Carrega dados de operação do banco de dados ou arquivo local
+    Prioriza dados locais quando são mais recentes que os do banco
     """
     import time  # Importar time no início da função
     
     try:
-        # Tentar carregar do Supabase primeiro
+        # Carregar dados locais primeiro para verificar se existem
+        dados_locais = []
+        if os.path.exists(DADOS['arquivo_saida']):
+            try:
+                with open(DADOS['arquivo_saida'], 'r', encoding='utf-8') as f:
+                    dados_locais = json.load(f)
+            except:
+                dados_locais = []
+        
+        # Tentar carregar do Supabase
+        dados_supabase = []
         if DB_AVAILABLE and db_manager.is_connected():
-            # Usar st.empty() para criar um placeholder que será limpo
             status_placeholder = st.empty()
             status_placeholder.info("🔄 Tentando carregar dados do Supabase...")
             
-            dados_supabase = db_manager.load_dados_operacao()
-            if dados_supabase:
-                status_placeholder.success(f"✅ Carregados {len(dados_supabase)} registros do Supabase")
-                # Limpar a mensagem após 5 segundos
-                time.sleep(5)
-                status_placeholder.empty()
-                return dados_supabase
-            else:
-                status_placeholder.warning("⚠️ Nenhum dado encontrado no Supabase")
-                time.sleep(3)
-                status_placeholder.empty()
+            try:
+                dados_supabase = db_manager.load_dados_operacao()
+                if dados_supabase:
+                    status_placeholder.success(f"✅ Carregados {len(dados_supabase)} registros do Supabase")
+                else:
+                    status_placeholder.warning("⚠️ Nenhum dado encontrado no Supabase")
+            except Exception as e:
+                status_placeholder.warning(f"⚠️ Erro ao carregar do Supabase: {e}")
+                dados_supabase = []
+            
+            time.sleep(3)
+            status_placeholder.empty()
         
-        # Carregar do arquivo local como fallback
-        if os.path.exists(DADOS['arquivo_saida']):
-            status_placeholder = st.empty()
-            status_placeholder.info("🔄 Carregando dados do arquivo local...")
-            with open(DADOS['arquivo_saida'], 'r', encoding='utf-8') as f:
-                dados = json.load(f)
-            status_placeholder.success(f"✅ Carregados {len(dados)} registros do arquivo local")
-            time.sleep(3)
-            status_placeholder.empty()
-            return dados
+        # Decidir qual fonte de dados usar
+        if dados_locais and dados_supabase:
+            # Comparar datas para decidir qual é mais recente
+            try:
+                # Encontrar data mais recente dos dados locais
+                datas_locais = [datetime.strptime(d['data'], '%Y-%m-%d') for d in dados_locais if 'data' in d]
+                data_max_local = max(datas_locais) if datas_locais else None
+                
+                # Encontrar data mais recente dos dados do banco
+                datas_banco = [datetime.strptime(d['data'], '%Y-%m-%d') for d in dados_supabase if 'data' in d]
+                data_max_banco = max(datas_banco) if datas_banco else None
+                
+                if data_max_local and data_max_banco:
+                    if data_max_local > data_max_banco:
+                        st.info(f"📅 Dados locais são mais recentes ({data_max_local.strftime('%d/%m/%Y')} vs {data_max_banco.strftime('%d/%m/%Y')})")
+                        st.info("💾 Usando dados locais")
+                        return dados_locais
+                    else:
+                        st.info(f"📅 Dados do banco são mais recentes ({data_max_banco.strftime('%d/%m/%Y')} vs {data_max_local.strftime('%d/%m/%Y')})")
+                        st.info("🌐 Usando dados do banco")
+                        return dados_supabase
+                else:
+                    # Se não conseguiu comparar datas, usar dados locais por segurança
+                    st.info("📅 Não foi possível comparar datas. Usando dados locais por segurança.")
+                    return dados_locais
+                    
+            except Exception as e:
+                st.warning(f"⚠️ Erro ao comparar datas: {e}. Usando dados locais.")
+                return dados_locais
+        
+        elif dados_locais:
+            # Só dados locais disponíveis
+            st.info(f"💾 Carregados {len(dados_locais)} registros do arquivo local")
+            return dados_locais
+        
+        elif dados_supabase:
+            # Só dados do banco disponíveis
+            st.info(f"🌐 Carregados {len(dados_supabase)} registros do Supabase")
+            return dados_supabase
+        
         else:
-            status_placeholder = st.empty()
-            status_placeholder.info("📝 Arquivo local não encontrado. Criando arquivo vazio...")
+            # Nenhum dado disponível
+            st.info("📝 Nenhum dado encontrado. Criando arquivo vazio...")
             # Criar arquivo vazio se não existir
-            with open(DADOS['arquivo_saida'], 'w', encoding='utf-8') as f:
-                json.dump([], f, ensure_ascii=False, indent=2)
-            status_placeholder.success("✅ Arquivo local criado com sucesso")
-            time.sleep(3)
-            status_placeholder.empty()
+            if not os.path.exists(DADOS['arquivo_saida']):
+                with open(DADOS['arquivo_saida'], 'w', encoding='utf-8') as f:
+                    json.dump([], f, ensure_ascii=False, indent=2)
+                st.success("✅ Arquivo local criado com sucesso")
             return []
         
     except Exception as e:
-        # Em caso de erro, tentar criar arquivo vazio sem usar placeholders
+        # Em caso de erro, tentar carregar dados locais
+        st.error(f"❌ Erro ao carregar dados: {e}")
+        try:
+            if os.path.exists(DADOS['arquivo_saida']):
+                with open(DADOS['arquivo_saida'], 'r', encoding='utf-8') as f:
+                    dados = json.load(f)
+                st.info(f"✅ Carregados {len(dados)} registros do arquivo local após erro")
+                return dados
+        except:
+            pass
+        
+        # Criar arquivo vazio como último recurso
         try:
             with open(DADOS['arquivo_saida'], 'w', encoding='utf-8') as f:
                 json.dump([], f, ensure_ascii=False, indent=2)
