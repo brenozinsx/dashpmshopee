@@ -33,6 +33,22 @@ from utils import (
     verificar_normalizacao_operador, buscar_operadores_por_padrao, carregar_pacotes_flutuantes_com_mapeamento
 )
 
+# Função para formatar tempo (minutos em horas quando apropriado)
+def formatar_tempo(tempo_minutos):
+    """Converte minutos em formato legível (horas e minutos quando > 59)"""
+    if pd.isna(tempo_minutos) or tempo_minutos < 0:
+        return "N/A"
+    
+    if tempo_minutos < 60:
+        return f"{tempo_minutos:.1f} min"
+    else:
+        horas = int(tempo_minutos // 60)
+        minutos = tempo_minutos % 60
+        if minutos == 0:
+            return f"{horas}h"
+        else:
+            return f"{horas}h {minutos:.0f}min"
+
 # Sistema de mensagens temporárias
 def show_temp_message(message, message_type="info", duration=10):
     """Exibe uma mensagem temporária que desaparece após o tempo especificado"""
@@ -360,8 +376,8 @@ st.markdown("""
 # Menu de navegação
 selected = option_menu(
     menu_title=None,
-    options=["📊 Dashboard Manual", "📈 Relatório CSV", "📦 Pacotes Flutuantes", "📋 Histórico", "🗄️ Banco de Dados"],
-    icons=["bar-chart", "file-earmark-text", "package", "clock-history", "database"],
+    options=["📊 Dashboard Manual", "📈 Relatório CSV", "📦 Pacotes Flutuantes", "🚚 Expedição", "📋 Histórico", "🗄️ Banco de Dados"],
+    icons=["bar-chart", "file-earmark-text", "package", "truck", "clock-history", "database"],
     menu_icon="cast",
     default_index=0,
     orientation="horizontal",
@@ -382,6 +398,14 @@ selected = option_menu(
 st.sidebar.markdown(f"""
 <div style="background: {CORES['azul']}; padding: 1rem; border-radius: 10px; color: white;">
     <h3>🎯 Indicadores</h3>
+</div>
+""", unsafe_allow_html=True)
+
+# Adicionar nova sessão de Expedição no sidebar
+st.sidebar.markdown(f"""
+<div style="background: {CORES['laranja']}; padding: 1rem; border-radius: 10px; color: white; margin-top: 1rem;">
+    <h3>🚚 Expedição</h3>
+    <p style="margin: 0; font-size: 0.9rem;">Dashboard de Controle da Expedição</p>
 </div>
 """, unsafe_allow_html=True)
 
@@ -2661,7 +2685,526 @@ elif selected == "📦 Pacotes Flutuantes":
         else:
             st.info("📝 Nenhum dado encontrado. Importe dados primeiro.")
 
-# ABA 4: Histórico
+# ABA 4: Expedição
+elif selected == "🚚 Expedição":
+    st.markdown("## 🚚 Dashboard de Controle da Expedição")
+    st.markdown("### Monitoramento de Performance e Indicadores de Expedição")
+    
+    # Abas para diferentes funcionalidades
+    tab1, tab2, tab3, tab4 = st.tabs(["📤 Importar CSV", "⏱️ Tempo Conferência", "🌊 Controle de Ondas", "📦 Rotas no Piso"])
+    
+    with tab1:
+        st.markdown("### 📤 Importar Arquivo CSV de Expedição")
+        st.markdown("**Formato esperado:** AT/TO, Corridor Cage, Total Scanned Orders, Validation Start Time, Validation End Time, Validation Operator, City, Delivering Time")
+        
+        # Upload do arquivo
+        uploaded_file = st.file_uploader(
+            "Selecione o arquivo CSV de expedição",
+            type=['csv'],
+            help="O arquivo deve conter as colunas: AT/TO, Corridor Cage, Total Scanned Orders, Validation Start Time, Validation End Time, Validation Operator, City, Delivering Time"
+        )
+        
+        if uploaded_file is not None:
+            try:
+                # Processar CSV
+                df_expedicao = pd.read_csv(uploaded_file)
+                
+                # Verificar colunas necessárias
+                colunas_necessarias = [
+                    'AT/TO', 'Corridor Cage', 'Total Scanned Orders', 
+                    'Validation Start Time', 'Validation End Time', 
+                    'Validation Operator', 'City', 'Delivering Time'
+                ]
+                
+                colunas_faltantes = [col for col in colunas_necessarias if col not in df_expedicao.columns]
+                if colunas_faltantes:
+                    st.error(f"❌ Colunas faltantes no CSV: {', '.join(colunas_faltantes)}")
+                else:
+                    st.success(f"✅ CSV processado com sucesso! {len(df_expedicao)} registros encontrados.")
+                    
+                    # Converter colunas de data
+                    df_expedicao['Validation Start Time'] = pd.to_datetime(df_expedicao['Validation Start Time'])
+                    df_expedicao['Validation End Time'] = pd.to_datetime(df_expedicao['Validation End Time'])
+                    df_expedicao['Delivering Time'] = pd.to_datetime(df_expedicao['Delivering Time'])
+                    
+                    # Adicionar coluna de data
+                    df_expedicao['Data'] = df_expedicao['Validation Start Time'].dt.date
+                    
+                    # Calcular tempo de conferência em minutos
+                    df_expedicao['Tempo_Conferencia_Min'] = (df_expedicao['Validation End Time'] - df_expedicao['Validation Start Time']).dt.total_seconds() / 60
+                    
+                    # Calcular tempo no piso (entre conferência e retirada)
+                    df_expedicao['Tempo_No_Piso_Min'] = (df_expedicao['Delivering Time'] - df_expedicao['Validation End Time']).dt.total_seconds() / 60
+                    
+                    # Extrair letra da onda (primeira letra do Corridor Cage)
+                    df_expedicao['Onda'] = df_expedicao['Corridor Cage'].str.extract(r'^([A-Z])')[0]
+                    
+                    # Mostrar preview dos dados
+                    st.markdown("### 📋 Preview dos Dados")
+                    st.dataframe(df_expedicao.head(10), use_container_width=True)
+                    
+                    # Estatísticas rápidas
+                    col1, col2, col3, col4 = st.columns(4)
+                    
+                    with col1:
+                        st.metric("Total de Registros", len(df_expedicao))
+                    
+                    with col2:
+                        operadores_unicos = df_expedicao['Validation Operator'].nunique()
+                        st.metric("Operadores Únicos", operadores_unicos)
+                    
+                    with col3:
+                        ondas_unicas = df_expedicao['Onda'].nunique()
+                        st.metric("Ondas", ondas_unicas)
+                    
+                    with col4:
+                        tempo_medio_conferencia = df_expedicao['Tempo_Conferencia_Min'].mean()
+                        st.metric("Tempo Médio Conferência", formatar_tempo(tempo_medio_conferencia))
+                    
+                    # Salvar dados na sessão para uso nas outras abas
+                    st.session_state['df_expedicao'] = df_expedicao
+                    st.success("✅ Dados carregados e processados com sucesso!")
+                    
+            except Exception as e:
+                st.error(f"❌ Erro ao processar CSV: {e}")
+    
+    with tab2:
+        st.markdown("### ⏱️ Tempo de Conferência por Operador")
+        
+        if 'df_expedicao' in st.session_state:
+            df_expedicao = st.session_state['df_expedicao']
+            
+            # Métricas gerais de tempo de conferência
+            col1, col2, col3, col4 = st.columns(4)
+            
+            with col1:
+                tempo_medio_geral = df_expedicao['Tempo_Conferencia_Min'].mean()
+                st.metric("Tempo Médio Geral", formatar_tempo(tempo_medio_geral))
+            
+            with col2:
+                tempo_medio_operador = df_expedicao.groupby('Validation Operator')['Tempo_Conferencia_Min'].mean().mean()
+                st.metric("Tempo Médio por Operador", formatar_tempo(tempo_medio_operador))
+            
+            with col3:
+                operador_mais_rapido = df_expedicao.groupby('Validation Operator')['Tempo_Conferencia_Min'].mean().idxmin()
+                tempo_mais_rapido = df_expedicao.groupby('Validation Operator')['Tempo_Conferencia_Min'].mean().min()
+                st.metric("Operador Mais Rápido", f"{operador_mais_rapido}")
+                st.caption(f"Tempo: {formatar_tempo(tempo_mais_rapido)}")
+            
+            with col4:
+                operador_mais_lento = df_expedicao.groupby('Validation Operator')['Tempo_Conferencia_Min'].mean().idxmax()
+                tempo_mais_lento = df_expedicao.groupby('Validation Operator')['Tempo_Conferencia_Min'].mean().max()
+                st.metric("Operador Mais Lento", f"{operador_mais_lento}")
+                st.caption(f"Tempo: {formatar_tempo(tempo_mais_lento)}")
+            
+            # Ranking de operadores por quantidade de rotas expedidas
+            st.markdown("### 🏆 Ranking de Operadores por Produtividade (Rotas Expedidas)")
+            
+            ranking_produtividade = df_expedicao.groupby('Validation Operator').agg({
+                'AT/TO': 'count',
+                'Total Scanned Orders': 'sum',
+                'Tempo_Conferencia_Min': 'mean'
+            }).reset_index()
+            
+            ranking_produtividade.columns = ['Operador', 'Total_AT_TO', 'Total_Pedidos', 'Tempo_Medio_Min']
+            ranking_produtividade = ranking_produtividade.sort_values('Total_AT_TO', ascending=False)
+            
+            # Adicionar classificação de performance baseada na quantidade de AT/TO
+            def classificar_performance_produtividade(at_to_count):
+                if at_to_count >= 10:
+                    return '🟢 Excelente'
+                elif at_to_count >= 7:
+                    return '🟡 Bom'
+                elif at_to_count >= 4:
+                    return '🟠 Atenção'
+                else:
+                    return '🔴 Crítico'
+            
+            ranking_produtividade['Performance'] = ranking_produtividade['Total_AT_TO'].apply(classificar_performance_produtividade)
+            
+            # Exibir ranking
+            for i, (_, row) in enumerate(ranking_produtividade.iterrows(), 1):
+                medal = "🥇" if i == 1 else "🥈" if i == 2 else "🥉" if i == 3 else f"#{i}"
+                
+                # Cor baseada na performance
+                if 'Excelente' in row['Performance']:
+                    card_color = "#e8f5e8"  # Verde claro
+                elif 'Bom' in row['Performance']:
+                    card_color = "#fff3e0"  # Laranja claro
+                elif 'Atenção' in row['Performance']:
+                    card_color = "#fff8e1"  # Amarelo claro
+                else:
+                    card_color = "#ffebee"  # Vermelho claro
+                
+                st.markdown(f"""
+                <div class="ranking-card" style="background-color: {card_color};">
+                    <div class="ranking-position">{medal}</div>
+                    <div class="ranking-name">{row['Operador']}</div>
+                    <div class="ranking-value">
+                        <strong>AT/TO Expedidos: {row['Total_AT_TO']}</strong> | 
+                        Total Pacotes: {row['Total_Pedidos']:,} | 
+                        Tempo Médio: {formatar_tempo(row['Tempo_Medio_Min'])} | 
+                        <strong>{row['Performance']}</strong>
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+            
+            # Gráfico de produtividade por operador
+            st.markdown("### 📊 Gráfico de Produtividade por Operador (AT/TO Expedidos)")
+            
+            fig_produtividade = px.bar(
+                ranking_produtividade.head(15),  # Top 15 operadores
+                x='Operador',
+                y='Total_AT_TO',
+                title='Quantidade de AT/TO Expedidos por Operador',
+                labels={'Total_AT_TO': 'AT/TO Expedidos', 'Operador': 'Operador'},
+                color='Total_AT_TO',
+                color_continuous_scale='Greens'  # Verde = mais produtivo
+            )
+            
+            fig_produtividade.update_layout(
+                xaxis_tickangle=-45,
+                height=500,
+                title_font_size=18
+            )
+            
+            st.plotly_chart(fig_produtividade, use_container_width=True)
+            
+        else:
+            st.info("📝 Importe dados de expedição na aba 'Importar CSV' para visualizar esta análise.")
+    
+    with tab3:
+        st.markdown("### 🌊 Controle de Ondas - Tempo de Finalização")
+        
+        if 'df_expedicao' in st.session_state:
+            df_expedicao = st.session_state['df_expedicao']
+            
+            # Agrupar por onda e data
+            df_ondas = df_expedicao.groupby(['Onda', 'Data']).agg({
+                'Validation Start Time': 'min',
+                'Validation End Time': 'max',
+                'Total Scanned Orders': 'sum',
+                'AT/TO': 'count'
+            }).reset_index()
+            
+            # Calcular tempo de finalização da onda
+            df_ondas['Tempo_Finalizacao_Onda_Min'] = (df_ondas['Validation End Time'] - df_ondas['Validation Start Time']).dt.total_seconds() / 60
+            
+            # Ordenar por data e onda
+            df_ondas = df_ondas.sort_values(['Data', 'Onda'])
+            
+            # Métricas gerais das ondas
+            col1, col2, col3, col4 = st.columns(4)
+            
+            with col1:
+                total_ondas = len(df_ondas)
+                st.metric("Total de Ondas", total_ondas)
+            
+            with col2:
+                tempo_medio_onda = df_ondas['Tempo_Finalizacao_Onda_Min'].mean()
+                st.metric("Tempo Médio por Onda", formatar_tempo(tempo_medio_onda))
+            
+            with col3:
+                total_pacotes_ondas = df_ondas['Total Scanned Orders'].sum()
+                st.metric("Total Pacotes nas Ondas", f"{total_pacotes_ondas:,}")
+            
+            with col4:
+                media_pacotes_onda = df_ondas['Total Scanned Orders'].mean()
+                st.metric("Média Pacotes por Onda", f"{media_pacotes_onda:.0f}")
+            
+            # Tabela de controle de ondas
+            st.markdown("### 📋 Controle de Ondas por Data")
+            
+            # Formatar dados para exibição
+            df_display_ondas = df_ondas.copy()
+            df_display_ondas['Data'] = pd.to_datetime(df_display_ondas['Data']).dt.strftime('%d/%m/%Y')
+            df_display_ondas['Validation Start Time'] = pd.to_datetime(df_display_ondas['Validation Start Time']).dt.strftime('%H:%M')
+            df_display_ondas['Validation End Time'] = pd.to_datetime(df_display_ondas['Validation End Time']).dt.strftime('%H:%M')
+            # Aplicar formatação de tempo
+            df_display_ondas['Tempo_Finalizacao_Onda_Min'] = df_display_ondas['Tempo_Finalizacao_Onda_Min'].apply(formatar_tempo)
+            
+            # Renomear colunas
+            df_display_ondas = df_display_ondas.rename(columns={
+                'Onda': 'Onda',
+                'Data': 'Data',
+                'Validation Start Time': 'Início',
+                'Validation End Time': 'Fim',
+                'Tempo_Finalizacao_Onda_Min': 'Tempo (min)',
+                'Total Scanned Orders': 'Total Pacotes',
+                'AT/TO': 'Total AT/TO'
+            })
+            
+            st.dataframe(df_display_ondas, use_container_width=True)
+            
+            # Gráfico de tempo de finalização por onda
+            st.markdown("### 📈 Tempo de Finalização por Onda")
+            
+            fig_ondas = px.bar(
+                df_ondas,
+                x='Onda',
+                y='Tempo_Finalizacao_Onda_Min',
+                color='Data',
+                title='Tempo de Finalização por Onda',
+                labels={'Tempo_Finalizacao_Onda_Min': 'Tempo (minutos)', 'Onda': 'Onda'},
+                barmode='group'
+            )
+            
+            fig_ondas.update_layout(
+                height=500,
+                title_font_size=18,
+                xaxis_title_font_size=16,
+                yaxis_title_font_size=16
+            )
+            
+            st.plotly_chart(fig_ondas, use_container_width=True)
+            
+            # Análise de sequência de ondas
+            st.markdown("### 🔍 Análise de Sequência de Ondas")
+            
+            # Agrupar por data para ver sequência
+            df_sequencia = df_ondas.groupby('Data').agg({
+                'Onda': lambda x: sorted(x.tolist()),
+                'Tempo_Finalizacao_Onda_Min': 'sum',
+                'Total Scanned Orders': 'sum'
+            }).reset_index()
+            
+            df_sequencia['Sequencia_Ondas'] = df_sequencia['Onda'].apply(lambda x: ' → '.join(x))
+            df_sequencia['Tempo_Total_Dia'] = df_sequencia['Tempo_Finalizacao_Onda_Min'].round(1)
+            
+            # Exibir sequência de ondas por dia
+            for _, row in df_sequencia.iterrows():
+                st.markdown(f"""
+                **📅 {row['Data']}**
+                - **Sequência:** {row['Sequencia_Ondas']}
+                - **Tempo Total:** {formatar_tempo(row['Tempo_Total_Dia'])}
+                - **Total Pacotes:** {row['Total Scanned Orders']:,}
+                """)
+                st.markdown("---")
+            
+        else:
+            st.info("📝 Importe dados de expedição na aba 'Importar CSV' para visualizar esta análise.")
+    
+    with tab4:
+        st.markdown("### 📦 Rotas no Piso - Tempo de Retirada")
+        
+        if 'df_expedicao' in st.session_state:
+            df_expedicao = st.session_state['df_expedicao']
+            
+            # Filtrar apenas registros com tempo no piso válido (positivo)
+            df_piso = df_expedicao[df_expedicao['Tempo_No_Piso_Min'] > 0].copy()
+            
+            if not df_piso.empty:
+                # Métricas de tempo no piso
+                col1, col2, col3, col4 = st.columns(4)
+                
+                with col1:
+                    tempo_medio_piso = df_piso['Tempo_No_Piso_Min'].mean()
+                    st.metric("Tempo Médio no Piso", formatar_tempo(tempo_medio_piso))
+                
+                with col2:
+                    tempo_maximo_piso = df_piso['Tempo_No_Piso_Min'].max()
+                    st.metric("Tempo Máximo no Piso", formatar_tempo(tempo_maximo_piso))
+                
+                with col3:
+                    rotas_afetadas = len(df_piso)
+                    st.metric("Rotas Afetadas", rotas_afetadas)
+                
+                with col4:
+                    total_pacotes_piso = df_piso['Total Scanned Orders'].sum()
+                    st.metric("Total Pacotes Afetados", f"{total_pacotes_piso:,}")
+                
+                # Análise de gargalos
+                st.markdown("### 🚨 Análise de Gargalos")
+                
+                # Classificar tempo no piso
+                def classificar_tempo_piso(tempo):
+                    if tempo <= 30:
+                        return '🟢 Normal'
+                    elif tempo <= 60:
+                        return '🟡 Atenção'
+                    elif tempo <= 120:
+                        return '🟠 Crítico'
+                    else:
+                        return '🔴 Muito Crítico'
+                
+                df_piso['Classificacao_Tempo'] = df_piso['Tempo_No_Piso_Min'].apply(classificar_tempo_piso)
+                
+                # Contar por classificação
+                classificacao_counts = df_piso['Classificacao_Tempo'].value_counts()
+                
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    st.markdown("#### 📊 Distribuição por Classificação")
+                    
+                    for classificacao, count in classificacao_counts.items():
+                        if 'Normal' in classificacao:
+                            st.success(f"{classificacao}: {count} rotas")
+                        elif 'Atenção' in classificacao:
+                            st.warning(f"{classificacao}: {count} rotas")
+                        elif 'Crítico' in classificacao:
+                            st.error(f"{classificacao}: {count} rotas")
+                        else:
+                            st.error(f"{classificacao}: {count} rotas")
+                
+                with col2:
+                    st.markdown("#### 📈 Métricas de Gargalo")
+                    
+                    # Calcular percentis
+                    percentil_75 = df_piso['Tempo_No_Piso_Min'].quantile(0.75)
+                    percentil_90 = df_piso['Tempo_No_Piso_Min'].quantile(0.90)
+                    percentil_95 = df_piso['Tempo_No_Piso_Min'].quantile(0.95)
+                    
+                    st.metric("75% das rotas", f"≤ {formatar_tempo(percentil_75)}")
+                    st.metric("90% das rotas", f"≤ {formatar_tempo(percentil_90)}")
+                    st.metric("95% das rotas", f"≤ {formatar_tempo(percentil_95)}")
+                
+                # Top 20 rotas com maior tempo no piso
+                st.markdown("### 🚨 Top 20 Rotas com Maior Tempo no Piso")
+                
+                df_top_piso = df_piso.nlargest(20, 'Tempo_No_Piso_Min')[['AT/TO', 'Corridor Cage', 'Validation Operator', 'City', 'Tempo_No_Piso_Min', 'Total Scanned Orders']].copy()
+                
+                # Formatar dados
+                df_top_piso['Tempo_No_Piso_Min'] = df_top_piso['Tempo_No_Piso_Min'].apply(formatar_tempo)
+                
+                # Renomear colunas
+                df_top_piso = df_top_piso.rename(columns={
+                    'AT/TO': 'AT/TO',
+                    'Corridor Cage': 'Rota',
+                    'Validation Operator': 'Operador',
+                    'City': 'Cidade',
+                    'Tempo_No_Piso_Min': 'Tempo no Piso (min)',
+                    'Total Scanned Orders': 'Total Pacotes'
+                })
+                
+                st.dataframe(df_top_piso, use_container_width=True)
+                
+                # Tabela de todas as rotas com 20+ minutos no piso
+                st.markdown("### 📋 Todas as Rotas com 20+ Minutos no Piso")
+                st.markdown("**Lista completa de rotas que ficaram 20 minutos ou mais paradas no piso**")
+                
+                # Filtrar rotas com 20+ minutos no piso
+                df_20_mais = df_piso[df_piso['Tempo_No_Piso_Min'] >= 20].copy()
+                
+                if not df_20_mais.empty:
+                    # Ordenar por tempo no piso (maior para menor)
+                    df_20_mais = df_20_mais.sort_values('Tempo_No_Piso_Min', ascending=False)
+                    
+                    # Formatar dados para exibição
+                    df_display_20_mais = df_20_mais[['AT/TO', 'Corridor Cage', 'Validation Operator', 'City', 'Tempo_No_Piso_Min', 'Total Scanned Orders']].copy()
+                    df_display_20_mais['Tempo_No_Piso_Min'] = df_display_20_mais['Tempo_No_Piso_Min'].apply(formatar_tempo)
+                    
+                    # Renomear colunas
+                    df_display_20_mais = df_display_20_mais.rename(columns={
+                        'AT/TO': 'AT/TO',
+                        'Corridor Cage': 'Rota',
+                        'Validation Operator': 'Operador',
+                        'City': 'Cidade',
+                        'Tempo_No_Piso_Min': 'Tempo no Piso',
+                        'Total Scanned Orders': 'Total Pacotes'
+                    })
+                    
+                    # Métricas da tabela
+                    col1, col2, col3 = st.columns(3)
+                    
+                    with col1:
+                        total_rotas_20_mais = len(df_20_mais)
+                        st.metric("Total Rotas 20+ min", total_rotas_20_mais)
+                    
+                    with col2:
+                        tempo_medio_20_mais = df_20_mais['Tempo_No_Piso_Min'].mean()
+                        st.metric("Tempo Médio", formatar_tempo(tempo_medio_20_mais))
+                    
+                    with col3:
+                        total_pacotes_20_mais = df_20_mais['Total Scanned Orders'].sum()
+                        st.metric("Total Pacotes Afetados", f"{total_pacotes_20_mais:,}")
+                    
+                    # Exibir tabela completa
+                    st.dataframe(df_display_20_mais, use_container_width=True, height=400)
+                    
+                    # Botão para exportar dados
+                    if st.button("📥 Exportar Rotas 20+ Minutos", key="export_20_mais"):
+                        nome_arquivo = f"rotas_20_mais_minutos_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+                        
+                        try:
+                            with pd.ExcelWriter(nome_arquivo, engine='xlsxwriter') as writer:
+                                df_20_mais.to_excel(writer, sheet_name='Rotas 20+ Minutos', index=False)
+                            
+                            # Ler arquivo para download
+                            with open(nome_arquivo, 'rb') as f:
+                                st.download_button(
+                                    label="💾 Download Excel - Rotas 20+ Minutos",
+                                    data=f.read(),
+                                    file_name=nome_arquivo,
+                                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                    key="download_20_mais"
+                                )
+                            
+                            # Limpar arquivo temporário
+                            import os
+                            os.remove(nome_arquivo)
+                            
+                        except Exception as e:
+                            st.error(f"❌ Erro ao gerar arquivo Excel: {e}")
+                    
+                else:
+                    st.success("✅ Nenhuma rota ficou 20 minutos ou mais no piso!")
+                
+                # Gráfico de tempo no piso por operador
+                st.markdown("### 📊 Tempo no Piso por Operador")
+                
+                tempo_por_operador = df_piso.groupby('Validation Operator')['Tempo_No_Piso_Min'].mean().sort_values(ascending=False).head(15)
+                
+                fig_piso = px.bar(
+                    x=tempo_por_operador.values,
+                    y=tempo_por_operador.index,
+                    orientation='h',
+                    title='Tempo Médio no Piso por Operador',
+                    labels={'x': 'Tempo Médio (minutos)', 'y': 'Operador'},
+                    color=tempo_por_operador.values,
+                    color_continuous_scale='Reds'
+                )
+                
+                fig_piso.update_layout(
+                    height=500,
+                    title_font_size=18,
+                    xaxis_title_font_size=16,
+                    yaxis_title_font_size=16
+                )
+                
+                st.plotly_chart(fig_piso, use_container_width=True)
+                
+                # Gráfico de distribuição de tempo no piso
+                st.markdown("### 📈 Distribuição de Tempo no Piso")
+                
+                fig_distribuicao = px.histogram(
+                    df_piso,
+                    x='Tempo_No_Piso_Min',
+                    nbins=30,
+                    title='Distribuição de Tempo no Piso',
+                    labels={'Tempo_No_Piso_Min': 'Tempo no Piso (minutos)', 'count': 'Quantidade de Rotas'}
+                )
+                
+                fig_distribuicao.update_layout(
+                    height=400,
+                    title_font_size=18,
+                    xaxis_title_font_size=16,
+                    yaxis_title_font_size=16
+                )
+                
+                # Adicionar linhas verticais para percentis
+                fig_distribuicao.add_vline(x=percentil_75, line_dash="dash", line_color="orange", annotation_text="75%")
+                fig_distribuicao.add_vline(x=percentil_90, line_dash="dash", line_color="red", annotation_text="90%")
+                
+                st.plotly_chart(fig_distribuicao, use_container_width=True)
+                
+            else:
+                st.success("✅ Nenhuma rota com tempo excessivo no piso encontrada!")
+                
+        else:
+            st.info("📝 Importe dados de expedição na aba 'Importar CSV' para visualizar esta análise.")
+
+# ABA 5: Histórico
 elif selected == "📋 Histórico":
     st.markdown("## 📋 Histórico de Dados")
     
