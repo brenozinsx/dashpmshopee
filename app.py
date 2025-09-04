@@ -24,13 +24,17 @@ from config import CORES, MENSAGENS, SUPABASE
 from utils import (
     processar_upload_planilha, exportar_dados_excel, gerar_relatorio_resumo,
     salvar_dados_operacao, carregar_dados_operacao, salvar_dados_validacao,
-    carregar_dados_validacao, salvar_flutuantes_operador, carregar_flutuantes_operador,
+    carregar_flutuantes_operador, salvar_flutuantes_operador,
     sincronizar_dados_locais, obter_estatisticas_banco, processar_csv_flutuantes,
     salvar_pacotes_flutuantes, carregar_pacotes_flutuantes, carregar_pacotes_flutuantes_multiplos_operadores,
     obter_ranking_operadores_flutuantes, obter_resumo_flutuantes_estacao, obter_total_flutuantes_por_data, 
     exportar_flutuantes_excel, processar_csv_dados_diarios, processar_multiplos_csvs_dados_diarios,
     agrupar_operadores_duplicados, obter_estatisticas_duplicacao_operadores, diagnosticar_operador,
-    verificar_normalizacao_operador, buscar_operadores_por_padrao, carregar_pacotes_flutuantes_com_mapeamento
+    verificar_normalizacao_operador, buscar_operadores_por_padrao, carregar_pacotes_flutuantes_com_mapeamento,
+    formatar_tempo_minutos, calcular_tempo_para_target, analisar_evolucao_tempo,
+    carregar_expedicao_consolidado, obter_recomendacao_operadores_top_6,
+    processar_csv_expedicao_consolidado, salvar_expedicao_consolidado,
+    backup_dados
 )
 
 # Função para formatar tempo (minutos em horas quando apropriado)
@@ -39,15 +43,8 @@ def formatar_tempo(tempo_minutos):
     if pd.isna(tempo_minutos) or tempo_minutos < 0:
         return "N/A"
     
-    if tempo_minutos < 60:
-        return f"{tempo_minutos:.1f} min"
-    else:
-        horas = int(tempo_minutos // 60)
-        minutos = tempo_minutos % 60
-        if minutos == 0:
-            return f"{horas}h"
-        else:
-            return f"{horas}h {minutos:.0f}min"
+    # Usar a nova função de formatação do utils
+    return formatar_tempo_minutos(tempo_minutos)
 
 # Sistema de mensagens temporárias
 def show_temp_message(message, message_type="info", duration=10):
@@ -2691,7 +2688,7 @@ elif selected == "🚚 Expedição":
     st.markdown("### Monitoramento de Performance e Indicadores de Expedição")
     
     # Abas para diferentes funcionalidades
-    tab1, tab2, tab3, tab4 = st.tabs(["📤 Importar CSV", "⏱️ Tempo Conferência", "🌊 Controle de Ondas", "📦 Rotas no Piso"])
+    tab1, tab2, tab3, tab4, tab5 = st.tabs(["📤 Importar CSV", "⏱️ Tempo Conferência", "🌊 Controle de Ondas", "📦 Rotas no Piso", "📊 Expedição Consolidado"])
     
     with tab1:
         st.markdown("### 📤 Importar Arquivo CSV de Expedição")
@@ -2764,6 +2761,32 @@ elif selected == "🚚 Expedição":
                     # Salvar dados na sessão para uso nas outras abas
                     st.session_state['df_expedicao'] = df_expedicao
                     st.success("✅ Dados carregados e processados com sucesso!")
+                    
+                    # Botão para armazenar dados históricos
+                    st.markdown("### 💾 Armazenar Dados Históricos")
+                    st.markdown("**Armazene estes dados para análise consolidada e recomendações de operadores**")
+                    
+                    if st.button("💾 Armazenar Dados no Banco", type="primary", key="armazenar_consolidado"):
+                        try:
+                            # Processar dados para formato consolidado
+                            dados_ondas, dados_operadores = processar_csv_expedicao_consolidado(df_expedicao, uploaded_file.name)
+                            
+                            if dados_ondas and dados_operadores:
+                                # Salvar no banco
+                                success = salvar_expedicao_consolidado(dados_ondas, dados_operadores, uploaded_file.name)
+                                
+                                if success:
+                                    st.success("🎉 Dados históricos armazenados com sucesso!")
+                                    st.info("💡 Agora você pode usar a aba 'Expedição Consolidado' para análises avançadas")
+                                    st.balloons()
+                                else:
+                                    st.error("❌ Falha ao armazenar dados históricos")
+                            else:
+                                st.error("❌ Erro ao processar dados para formato consolidado")
+                                
+                        except Exception as e:
+                            st.error(f"❌ Erro ao armazenar dados: {e}")
+                            st.info("💡 Verifique se o banco de dados está conectado")
                     
             except Exception as e:
                 st.error(f"❌ Erro ao processar CSV: {e}")
@@ -3203,6 +3226,323 @@ elif selected == "🚚 Expedição":
                 
         else:
             st.info("📝 Importe dados de expedição na aba 'Importar CSV' para visualizar esta análise.")
+    
+    with tab5:
+        st.markdown("### 📊 Expedição Consolidado - Análise Histórica e Recomendações")
+        st.markdown("**Dashboard consolidado com indicadores de evolução e recomendações de operadores**")
+        
+        # Verificar se há dados no banco
+        from database import db_manager
+        
+        # Estatísticas gerais
+        if db_manager.is_connected():
+            stats = db_manager.obter_estatisticas_expedicao_consolidado()
+            
+            if stats and stats.get('total_ondas', 0) > 0:
+                col1, col2, col3, col4 = st.columns(4)
+                
+                with col1:
+                    st.metric("Total de Ondas", f"{stats['total_ondas']:,}")
+                
+                with col2:
+                    st.metric("Total de Operadores", f"{stats['total_operadores']:,}")
+                
+                with col3:
+                    st.metric("Datas Únicas", f"{stats['datas_unicas']:,}")
+                
+                with col4:
+                    st.metric("Status", "✅ Conectado")
+                
+                # Filtros de período
+                st.markdown("### 🔍 Filtros de Período")
+                
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    data_inicio = st.date_input(
+                        "Data Início",
+                        value=datetime.now().date() - timedelta(days=30),
+                        key="consolidado_data_inicio"
+                    )
+                
+                with col2:
+                    data_fim = st.date_input(
+                        "Data Fim",
+                        value=datetime.now().date(),
+                        key="consolidado_data_fim"
+                    )
+                
+                # Carregar dados filtrados
+                dados_consolidados = carregar_expedicao_consolidado(
+                    data_inicio.strftime('%Y-%m-%d'),
+                    data_fim.strftime('%Y-%m-%d')
+                )
+                
+                if not dados_consolidados.empty:
+                    # Métricas do período
+                    st.markdown("### 📈 Métricas do Período Selecionado")
+                    
+                    col1, col2, col3, col4 = st.columns(4)
+                    
+                    with col1:
+                        total_ondas_periodo = len(dados_consolidados)
+                        st.metric("Total Ondas", total_ondas_periodo)
+                    
+                    with col2:
+                        tempo_medio_periodo = dados_consolidados['tempo_total_minutos'].mean()
+                        tempo_formatado = formatar_tempo_minutos(tempo_medio_periodo)
+                        tempo_para_target = calcular_tempo_para_target(tempo_medio_periodo)
+                        
+                        # Análise de evolução
+                        analise_evolucao = analisar_evolucao_tempo(dados_consolidados)
+                        
+                        st.metric(
+                            "Tempo Médio Onda", 
+                            f"{tempo_formatado} {tempo_para_target}",
+                            delta=f"{analise_evolucao.get('mensagem', '')}"
+                        )
+                    
+                    with col3:
+                        ondas_dentro_target = len(dados_consolidados[dados_consolidados['tempo_total_minutos'] <= 50])
+                        percentual_target = (ondas_dentro_target / total_ondas_periodo * 100) if total_ondas_periodo > 0 else 0
+                        st.metric("Ondas ≤ 50min", f"{ondas_dentro_target} ({percentual_target:.1f}%)")
+                    
+                    with col4:
+                        total_pacotes_periodo = dados_consolidados['total_pacotes'].sum()
+                        st.metric("Total Pacotes", f"{total_pacotes_periodo:,}")
+                    
+                    # Análise de evolução e tendência
+                    if analise_evolucao and analise_evolucao.get('tendencia') != 'insuficiente':
+                        st.markdown("### 📊 Análise de Evolução e Tendência")
+                        
+                        col1, col2, col3 = st.columns(3)
+                        
+                        with col1:
+                            if analise_evolucao['tendencia'] == 'melhorando':
+                                st.success(f"📈 **Tendência: MELHORANDO**")
+                                st.metric("Variação", f"{abs(analise_evolucao['variacao_percentual']):.1f}%", delta="↓ Melhoria")
+                            elif analise_evolucao['tendencia'] == 'piorando':
+                                st.error(f"📉 **Tendência: PIORANDO**")
+                                st.metric("Variação", f"{abs(analise_evolucao['variacao_percentual']):.1f}%", delta="↑ Piora")
+                            else:
+                                st.warning(f"➡️ **Tendência: ESTÁVEL**")
+                                st.metric("Variação", f"{abs(analise_evolucao['variacao_percentual']):.1f}%", delta="→ Estável")
+                        
+                        with col2:
+                            st.metric("Primeira Metade", formatar_tempo_minutos(analise_evolucao['primeira_metade']))
+                        
+                        with col3:
+                            st.metric("Segunda Metade", formatar_tempo_minutos(analise_evolucao['segunda_metade']))
+                        
+                        # Projeção para atingir target
+                        if analise_evolucao.get('dias_para_target'):
+                            st.info(f"🎯 **Projeção:** Com a tendência atual, você deve atingir o target de 50 minutos em aproximadamente **{analise_evolucao['dias_para_target']} dias**")
+                        elif analise_evolucao['tendencia'] == 'melhorando' and analise_evolucao['segunda_metade'] <= 50:
+                            st.success("🎯 **Meta Atingida!** Você já está dentro do target de 50 minutos e melhorando!")
+                        elif analise_evolucao['tendencia'] == 'piorando':
+                            st.warning("⚠️ **Atenção:** A tendência está piorando. Considere revisar processos ou treinamento.")
+                    
+                    # Gráfico de evolução do tempo das ondas
+                    st.markdown("### 📊 Evolução do Tempo das Ondas")
+                    
+                    # Agrupar por data
+                    df_evolucao = dados_consolidados.groupby('data_operacao').agg({
+                        'tempo_total_minutos': 'mean'
+                    }).reset_index()
+                    
+                    # Adicionar contagem de ondas
+                    df_evolucao['total_ondas'] = dados_consolidados.groupby('data_operacao').size().values
+                    
+                    df_evolucao['data_operacao'] = pd.to_datetime(df_evolucao['data_operacao'])
+                    df_evolucao = df_evolucao.sort_values('data_operacao')
+                    
+                    # Adicionar linha de target (50 minutos)
+                    fig_evolucao = go.Figure()
+                    
+                    # Linha de evolução
+                    fig_evolucao.add_trace(go.Scatter(
+                        x=df_evolucao['data_operacao'],
+                        y=df_evolucao['tempo_total_minutos'],
+                        mode='lines+markers',
+                        name='Tempo Médio das Ondas',
+                        line=dict(color=CORES['azul'], width=3),
+                        marker=dict(size=8),
+                        text=[f"Data: {data.strftime('%d/%m')}<br>Tempo: {formatar_tempo_minutos(tempo)}<br>Ondas: {ondas}" 
+                              for data, tempo, ondas in zip(df_evolucao['data_operacao'], 
+                                                          df_evolucao['tempo_total_minutos'], 
+                                                          df_evolucao['total_ondas'])],
+                        hovertemplate='<b>%{text}</b><extra></extra>'
+                    ))
+                    
+                    # Linha de target (50 minutos)
+                    fig_evolucao.add_hline(
+                        y=50,
+                        line_dash="dash",
+                        line_color=CORES['verde'],
+                        annotation_text="Target: 50 minutos",
+                        annotation_position="top right"
+                    )
+                    
+                    # Formatar eixo Y para mostrar tempo de forma legível
+                    y_values = df_evolucao['tempo_total_minutos'].tolist()
+                    y_text = [formatar_tempo_minutos(val) for val in y_values]
+                    
+                    fig_evolucao.update_layout(
+                        title="Evolução do Tempo Médio das Ondas",
+                        xaxis_title="Data",
+                        yaxis_title="Tempo",
+                        height=500,
+                        showlegend=True
+                    )
+                    
+                    # Atualizar eixo Y com formatação personalizada
+                    fig_evolucao.update_yaxes(
+                        ticktext=y_text,
+                        tickvals=y_values
+                    )
+                    
+                    st.plotly_chart(fig_evolucao, use_container_width=True)
+                    
+                    # Análise de performance por onda
+                    st.markdown("### 🌊 Análise de Performance por Onda")
+                    
+                    col1, col2 = st.columns(2)
+                    
+                    with col1:
+                        # Distribuição de tempo das ondas
+                        fig_distribuicao = px.histogram(
+                            dados_consolidados,
+                            x='tempo_total_minutos',
+                            nbins=20,
+                            title='Distribuição do Tempo das Ondas',
+                            labels={'tempo_total_minutos': 'Tempo', 'count': 'Quantidade de Ondas'},
+                            text_auto=True  # Mostrar valores nas barras
+                        )
+                        
+                        # Adicionar linha vertical para target
+                        fig_distribuicao.add_vline(x=50, line_dash="dash", line_color="green", annotation_text="Target: 50min")
+                        
+                        # Formatar eixo X para mostrar tempo de forma legível
+                        x_values = dados_consolidados['tempo_total_minutos'].tolist()
+                        x_text = [formatar_tempo_minutos(val) for val in x_values]
+                        
+                        fig_distribuicao.update_xaxes(
+                            ticktext=x_text,
+                            tickvals=x_values
+                        )
+                        
+                        # Melhorar hover e rótulos
+                        fig_distribuicao.update_traces(
+                            hovertemplate='<b>Tempo:</b> %{x}<br><b>Quantidade de Ondas:</b> %{y}<extra></extra>',
+                            textposition='outside'
+                        )
+                        
+                        st.plotly_chart(fig_distribuicao, use_container_width=True)
+                    
+                    with col2:
+                        # Performance por número da onda
+                        df_onda_performance = dados_consolidados.groupby('numero_onda').agg({
+                            'tempo_total_minutos': 'mean'
+                        }).reset_index()
+                        
+                        # Adicionar contagem de ondas
+                        df_onda_performance['total_ondas'] = dados_consolidados.groupby('numero_onda').size().values
+                        
+                        fig_onda = px.bar(
+                            df_onda_performance,
+                            x='numero_onda',
+                            y='tempo_total_minutos',
+                            title='Tempo Médio por Número da Onda',
+                            labels={'numero_onda': 'Número da Onda', 'tempo_total_minutos': 'Tempo Médio'},
+                            text_auto=True  # Mostrar valores nas barras
+                        )
+                        
+                        # Adicionar linha horizontal para target
+                        fig_onda.add_hline(y=50, line_dash="dash", line_color="green", annotation_text="Target: 50min")
+                        
+                        # Formatar eixo Y para mostrar tempo de forma legível
+                        y_values = df_onda_performance['tempo_total_minutos'].tolist()
+                        y_text = [formatar_tempo_minutos(val) for val in y_values]
+                        
+                        fig_onda.update_yaxes(
+                            ticktext=y_text,
+                            tickvals=y_values
+                        )
+                        
+                        # Melhorar hover e rótulos
+                        fig_onda.update_traces(
+                            hovertemplate='<b>Onda:</b> %{x}<br><b>Tempo Médio:</b> %{y}<br><b>Total de Ondas:</b> %{text}<extra></extra>',
+                            textposition='outside'
+                        )
+                        
+                        st.plotly_chart(fig_onda, use_container_width=True)
+                    
+                    # Recomendação de operadores para top 6
+                    st.markdown("### 👥 Recomendação de Operadores para Top 6")
+                    st.markdown("**Baseado no histórico de performance, estes são os melhores operadores para iniciar as ondas:**")
+                    
+                    df_recomendacao = obter_recomendacao_operadores_top_6()
+                    
+                    if not df_recomendacao.empty:
+                        # Exibir top 6 operadores
+                        for i, (_, row) in enumerate(df_recomendacao.iterrows(), 1):
+                            medal = "🥇" if i == 1 else "🥈" if i == 2 else "🥉" if i == 3 else f"#{i}"
+                            
+                            # Cor baseada na eficiência
+                            if row['eficiencia_media'] >= 80:
+                                card_color = "#e8f5e8"  # Verde claro
+                            elif row['eficiencia_media'] >= 60:
+                                card_color = "#fff3e0"  # Laranja claro
+                            else:
+                                card_color = "#fff8e1"  # Amarelo claro
+                            
+                            st.markdown(f"""
+                            <div class="ranking-card" style="background-color: {card_color};">
+                                <div class="ranking-position">{medal}</div>
+                                <div class="ranking-name">{row['operador']}</div>
+                                <div class="ranking-value">
+                                    <strong>Eficiência: {row['eficiencia_media']:.1f}%</strong> | 
+                                    Dias Trabalhados: {row['dias_trabalhados']} | 
+                                    AT/TO Carreira: {row['total_at_to_carreira']:,} | 
+                                    Top 6: {row['percentual_top_6']:.1f}%
+                                </div>
+                                <div style="margin-top: 0.5rem; font-size: 0.9rem; color: #666;">
+                                    <strong>Justificativa:</strong> {row['justificativa']}
+                                </div>
+                            </div>
+                            """, unsafe_allow_html=True)
+                        
+                        # Explicação da estratégia
+                        st.markdown("""
+                        #### 🎯 Estratégia de Seleção dos Top 6
+                        
+                        **Por que estes operadores?**
+                        - **Eficiência (40-60%):** Combina velocidade e qualidade (peso ajustado conforme dados disponíveis)
+                        - **Frequência no Top 6 (20-30%):** Histórico de performance consistente
+                        - **Volume de Trabalho (15-20%):** Experiência comprovada
+                        - **Velocidade (5-10%):** Capacidade de processar rapidamente
+                        
+                        **📊 Ajuste Automático de Pesos:**
+                        - **Com 1-2 dias:** Maior peso na eficiência atual
+                        - **Com 3+ dias:** Pesos balanceados para histórico completo
+                        
+                        **Benefícios:**
+                        - ✅ Início das ondas mais eficiente
+                        - ✅ Redução do tempo total de expedição
+                        - ✅ Maior chance de atingir o target de 50 minutos
+                        - ✅ Operadores restantes podem fazer intervalo e retornar para ondas subsequentes
+                        """)
+                        
+                    else:
+                        st.info("📝 Dados insuficientes para gerar recomendações. Importe mais dados históricos.")
+                        
+                else:
+                    st.info("📝 Nenhum dado encontrado para o período selecionado.")
+                    
+            else:
+                st.info("📝 Nenhum dado consolidado encontrado no banco. Importe dados na aba 'Importar CSV' e use o botão 'Armazenar Dados no Banco'.")
+        else:
+            st.warning("⚠️ Banco de dados não conectado. Conecte-se ao Supabase para usar esta funcionalidade.")
 
 # ABA 5: Histórico
 elif selected == "📋 Histórico":
@@ -3338,7 +3678,6 @@ elif selected == "🗄️ Banco de Dados":
     with col1:
         if st.button("💾 Criar Backup Completo"):
             if dados_locais:
-                from utils import backup_dados
                 backup_file = backup_dados(dados_locais)
                 if backup_file:
                     show_temp_message(f"✅ Backup criado: {backup_file}", "success")

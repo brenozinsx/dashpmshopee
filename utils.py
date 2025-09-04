@@ -6,6 +6,7 @@ import os
 import re
 import unicodedata
 from config import DADOS, MENSAGENS
+import numpy as np
 
 # Importação condicional do database para evitar erros
 try:
@@ -1233,4 +1234,394 @@ def carregar_pacotes_flutuantes_com_mapeamento(limit: int = 1000, operadores_rea
             
     except Exception as e:
         st.error(f"❌ Erro ao carregar pacotes flutuantes com mapeamento: {e}")
+        return pd.DataFrame()
+
+# ============================================================================
+# FUNÇÕES AUXILIARES PARA CONVERSÃO DE TIPOS
+# ============================================================================
+
+def converter_tipos_python(dados):
+    """
+    Converte tipos numpy/pandas para tipos Python nativos para evitar problemas de serialização JSON
+    """
+    if isinstance(dados, dict):
+        return {chave: converter_tipos_python(valor) for chave, valor in dados.items()}
+    elif isinstance(dados, list):
+        return [converter_tipos_python(item) for item in dados]
+    elif hasattr(dados, 'item'):  # numpy types
+        return dados.item()
+    elif hasattr(dados, 'dtype'):  # pandas types
+        if pd.isna(dados):
+            return None
+        return dados.item() if hasattr(dados, 'item') else dados
+    elif isinstance(dados, (np.integer, np.floating, np.bool_)):
+        return dados.item()
+    elif isinstance(dados, np.ndarray):
+        return dados.tolist()
+    else:
+        return dados
+
+# ============================================================================
+# FUNÇÕES PARA EXPEDIÇÃO CONSOLIDADO
+# ============================================================================
+
+def processar_csv_expedicao_consolidado(df_expedicao: pd.DataFrame, arquivo_origem: str) -> tuple:
+    """
+    Processa CSV de expedição para gerar dados consolidados
+    Retorna: (dados_ondas, dados_operadores)
+    """
+    try:
+        st.info("🔄 Processando dados para expedição consolidado...")
+        
+        # Converter colunas de data
+        df_expedicao['Validation Start Time'] = pd.to_datetime(df_expedicao['Validation Start Time'])
+        df_expedicao['Validation End Time'] = pd.to_datetime(df_expedicao['Validation End Time'])
+        df_expedicao['Delivering Time'] = pd.to_datetime(df_expedicao['Delivering Time'])
+        
+        # Adicionar coluna de data
+        df_expedicao['Data'] = df_expedicao['Validation Start Time'].dt.date
+        
+        # Extrair letra da onda (primeira letra do Corridor Cage)
+        df_expedicao['Onda'] = df_expedicao['Corridor Cage'].str.extract(r'^([A-Z])')[0]
+        
+        # Calcular tempo de conferência em minutos
+        df_expedicao['Tempo_Conferencia_Min'] = (df_expedicao['Validation End Time'] - df_expedicao['Validation Start Time']).dt.total_seconds() / 60
+        
+        # Calcular tempo no piso (entre conferência e retirada)
+        df_expedicao['Tempo_No_Piso_Min'] = (df_expedicao['Delivering Time'] - df_expedicao['Validation End Time']).dt.total_seconds() / 60
+        
+        # Agrupar por data e onda para consolidar
+        dados_ondas = []
+        dados_operadores = []
+        
+        # Processar cada data
+        for data_operacao in df_expedicao['Data'].unique():
+            df_data = df_expedicao[df_expedicao['Data'] == data_operacao]
+            
+            # Agrupar por onda nesta data
+            for onda_letra in df_data['Onda'].unique():
+                df_onda = df_data[df_data['Onda'] == onda_letra]
+                
+                # Calcular métricas da onda
+                hora_inicio = df_onda['Validation Start Time'].min()
+                hora_fim = df_onda['Validation End Time'].max()
+                tempo_total = (hora_fim - hora_inicio).total_seconds() / 60
+                total_at_to = len(df_onda)
+                total_pacotes = df_onda['Total Scanned Orders'].sum()
+                operadores_ativos = df_onda['Validation Operator'].nunique()
+                operadores_utilizados = df_onda['Validation Operator'].unique().tolist()
+                
+                # Calcular tempos médios
+                tempo_medio_por_at_to = df_onda['Tempo_Conferencia_Min'].mean()
+                tempo_medio_por_pacote = tempo_total / total_pacotes if total_pacotes > 0 else 0
+                
+                # Determinar número da onda (sequencial por data)
+                ondas_data = sorted(df_data['Onda'].unique())
+                numero_onda = ondas_data.index(onda_letra) + 1
+                
+                # Criar registro da onda
+                dados_onda = {
+                    'data_operacao': data_operacao.strftime('%Y-%m-%d'),
+                    'numero_onda': numero_onda,
+                    'letra_onda': onda_letra,
+                    'hora_inicio': hora_inicio.isoformat(),
+                    'hora_fim': hora_fim.isoformat(),
+                    'tempo_total_minutos': round(tempo_total, 2),
+                    'total_at_to': total_at_to,
+                    'total_pacotes': total_pacotes,
+                    'operadores_ativos': operadores_ativos,
+                    'operadores_utilizados': operadores_utilizados,
+                    'tempo_medio_por_at_to': round(tempo_medio_por_at_to, 2),
+                    'tempo_medio_por_pacote': round(tempo_medio_por_pacote, 2),
+                    'status_onda': 'Finalizada',
+                    'observacoes': f'Onda {onda_letra} processada em {tempo_total:.1f} minutos',
+                    'arquivo_origem': arquivo_origem
+                }
+                
+                dados_ondas.append(dados_onda)
+                
+                # Processar dados dos operadores nesta onda
+                for operador in df_onda['Validation Operator'].unique():
+                    df_operador = df_onda[df_onda['Validation Operator'] == operador]
+                    
+                    # Calcular métricas do operador
+                    total_at_to_operador = len(df_operador)
+                    total_pacotes_operador = df_operador['Total Scanned Orders'].sum()
+                    tempo_total_operador = df_operador['Tempo_Conferencia_Min'].sum()
+                    tempo_medio_por_at_to_operador = df_operador['Tempo_Conferencia_Min'].mean()
+                    tempo_medio_por_pacote_operador = tempo_total_operador / total_pacotes_operador if total_pacotes_operador > 0 else 0
+                    
+                    # Calcular eficiência do operador (score 0-100)
+                    # Baseado no tempo médio e quantidade de AT/TO
+                    tempo_base = 50  # 50 minutos é o target
+                    eficiencia_tempo = max(0, 100 - ((tempo_medio_por_at_to_operador - tempo_base) / tempo_base * 100))
+                    eficiencia_volume = min(100, (total_at_to_operador / 10) * 100)  # 10 AT/TO = 100%
+                    eficiencia_operador = (eficiencia_tempo + eficiencia_volume) / 2
+                    
+                    # Calcular posição no ranking do dia (baseado na eficiência)
+                    operadores_dia = df_data['Validation Operator'].unique()
+                    eficiencias_dia = []
+                    for op in operadores_dia:
+                        df_op = df_data[df_data['Validation Operator'] == op]
+                        tempo_op = df_op['Tempo_Conferencia_Min'].mean()
+                        at_to_op = len(df_op)
+                        efic_tempo = max(0, 100 - ((tempo_op - tempo_base) / tempo_base * 100))
+                        efic_volume = min(100, (at_to_op / 10) * 100)
+                        eficiencias_dia.append((op, (efic_tempo + efic_volume) / 2))
+                    
+                    # Ordenar por eficiência e encontrar posição
+                    eficiencias_dia.sort(key=lambda x: x[1], reverse=True)
+                    posicao_ranking = next((i + 1 for i, (op, _) in enumerate(eficiencias_dia) if op == operador), 999)
+                    
+                    # Criar registro do operador
+                    dados_operador = {
+                        'data_operacao': data_operacao.strftime('%Y-%m-%d'),
+                        'operador': operador,
+                        'numero_onda': numero_onda,
+                        'total_at_to_expedidos': total_at_to_operador,
+                        'total_pacotes_processados': total_pacotes_operador,
+                        'tempo_total_trabalho_minutos': round(tempo_total_operador, 2),
+                        'tempo_medio_por_at_to': round(tempo_medio_por_at_to_operador, 2),
+                        'tempo_medio_por_pacote': round(tempo_medio_por_pacote_operador, 2),
+                        'eficiencia_operador': round(eficiencia_operador, 2),
+                        'posicao_ranking': posicao_ranking,
+                        'arquivo_origem': arquivo_origem
+                    }
+                    
+                    dados_operadores.append(dados_operador)
+        
+        # Converter tipos para Python nativos antes de retornar
+        dados_ondas_convertidos = converter_tipos_python(dados_ondas)
+        dados_operadores_convertidos = converter_tipos_python(dados_operadores)
+        
+        st.success(f"✅ Processamento concluído!")
+        st.info(f"  📊 Ondas processadas: {len(dados_ondas_convertidos)}")
+        st.info(f"  👥 Registros de operadores: {len(dados_operadores_convertidos)}")
+        
+        return dados_ondas_convertidos, dados_operadores_convertidos
+        
+    except Exception as e:
+        st.error(f"❌ Erro ao processar dados consolidados: {e}")
+        return [], []
+
+def salvar_expedicao_consolidado(dados_ondas: list, dados_operadores: list, arquivo_origem: str) -> bool:
+    """
+    Salva dados consolidados de expedição no banco de dados
+    """
+    try:
+        if not DB_AVAILABLE or not db_manager.is_connected():
+            st.warning("⚠️ Supabase não conectado. Dados não podem ser salvos.")
+            return False
+        
+        # Salvar usando a função do database manager
+        success = db_manager.salvar_expedicao_consolidado(dados_ondas, dados_operadores, arquivo_origem)
+        
+        if success:
+            st.success("✅ Dados consolidados salvos com sucesso no banco!")
+            return True
+        else:
+            st.error("❌ Falha ao salvar dados consolidados!")
+            return False
+            
+    except Exception as e:
+        st.error(f"❌ Erro ao salvar dados consolidados: {e}")
+        return False
+
+def carregar_expedicao_consolidado(data_inicio: str = None, data_fim: str = None) -> pd.DataFrame:
+    """
+    Carrega dados consolidados de expedição do banco
+    """
+    try:
+        if not DB_AVAILABLE or not db_manager.is_connected():
+            st.warning("⚠️ Supabase não conectado.")
+            return pd.DataFrame()
+        
+        return db_manager.carregar_expedicao_consolidado(data_inicio, data_fim)
+        
+    except Exception as e:
+        st.error(f"❌ Erro ao carregar dados consolidados: {e}")
+        return pd.DataFrame()
+
+def obter_recomendacao_operadores_top_6(data_referencia: str = None) -> pd.DataFrame:
+    """
+    Obtém recomendação dos 6 melhores operadores para iniciar ondas
+    Baseado no histórico de performance
+    """
+    try:
+        if not DB_AVAILABLE or not db_manager.is_connected():
+            st.warning("⚠️ Supabase não conectado.")
+            return pd.DataFrame()
+        
+        # Carregar ranking de operadores
+        df_ranking = db_manager.obter_ranking_expedicao_operadores()
+        
+        if df_ranking.empty:
+            st.info("📝 Nenhum dado de ranking disponível.")
+            return pd.DataFrame()
+        
+        # Filtrar operadores com pelo menos 1 dia de trabalho (mais flexível)
+        dias_minimos = 1
+        df_filtrado = df_ranking[df_ranking['dias_trabalhados'] >= dias_minimos].copy()
+        
+        if df_filtrado.empty:
+            st.info(f"📝 Nenhum operador com pelo menos {dias_minimos} dia(s) de trabalho encontrado.")
+            return pd.DataFrame()
+        
+        # Ajustar pesos baseado na quantidade de dias disponíveis
+        if df_filtrado['dias_trabalhados'].max() < 3:
+            st.info("📊 **Atenção:** Dados limitados (menos de 3 dias). Recomendações baseadas em performance recente.")
+            # Ajustar pesos para dados limitados
+            peso_eficiencia = 0.6  # Aumentar peso da eficiência
+            peso_frequencia = 0.2  # Reduzir peso da frequência
+            peso_volume = 0.15     # Manter volume
+            peso_velocidade = 0.05 # Reduzir velocidade
+        else:
+            # Pesos normais para dados suficientes
+            peso_eficiencia = 0.4
+            peso_frequencia = 0.3
+            peso_volume = 0.2
+            peso_velocidade = 0.1
+        
+        # Calcular score composto para ranking usando pesos dinâmicos
+        df_filtrado['score_composto'] = (
+            df_filtrado['eficiencia_media'] * peso_eficiencia +
+            (df_filtrado['percentual_top_6'] * peso_frequencia) +
+            (df_filtrado['total_at_to_carreira'] / 100 * peso_volume) +
+            (100 - df_filtrado['tempo_medio_por_at_to_carreira']) * peso_velocidade
+        )
+        
+        # Ordenar por score e pegar top 6
+        df_top_6 = df_filtrado.nlargest(6, 'score_composto').copy()
+        
+        # Adicionar justificativa para cada operador
+        justificativas = []
+        for _, row in df_top_6.iterrows():
+            if row['eficiencia_media'] >= 80:
+                justificativa = "🟢 Alta eficiência"
+            elif row['eficiencia_media'] >= 60:
+                justificativa = "🟡 Boa eficiência"
+            else:
+                justificativa = "🟠 Eficiência regular"
+            
+            # Adicionar informação sobre dias trabalhados
+            if row['dias_trabalhados'] == 1:
+                justificativa += " | 📅 1 dia de trabalho"
+            else:
+                justificativa += f" | 📅 {row['dias_trabalhados']} dias de trabalho"
+            
+            if row['percentual_top_6'] >= 70:
+                justificativa += " | 🏆 Frequente no top 6"
+            elif row['percentual_top_6'] >= 40:
+                justificativa += " | 🥉 Ocasional no top 6"
+            elif row['dias_trabalhados'] == 1:
+                justificativa += " | 🆕 Primeiro dia avaliado"
+            
+            if row['total_at_to_carreira'] >= 100:
+                justificativa += " | 📦 Alto volume de trabalho"
+            elif row['total_at_to_carreira'] >= 50:
+                justificativa += " | 📦 Bom volume de trabalho"
+            
+            justificativas.append(justificativa)
+        
+        df_top_6['justificativa'] = justificativas
+        
+        return df_top_6
+        
+    except Exception as e:
+        st.error(f"❌ Erro ao obter recomendação de operadores: {e}")
         return pd.DataFrame() 
+
+# ============================================================================
+# FUNÇÕES AUXILIARES PARA FORMATAÇÃO E ANÁLISE
+# ============================================================================
+
+def formatar_tempo_minutos(minutos: float) -> str:
+    """
+    Formata tempo em minutos para exibição legível
+    - Se < 60 min: mostra em minutos
+    - Se >= 60 min: mostra em horas e minutos
+    """
+    if minutos < 60:
+        return f"{minutos:.1f} min"
+    else:
+        horas = int(minutos // 60)
+        mins = int(minutos % 60)
+        if mins == 0:
+            return f"{horas}h"
+        else:
+            return f"{horas}h {mins}min"
+
+def calcular_tempo_para_target(tempo_atual: float, target: float = 50) -> str:
+    """
+    Calcula quanto tempo falta para atingir o target
+    Retorna string formatada com diferença
+    """
+    if tempo_atual <= target:
+        return f"(✅ {target - tempo_atual:.1f}min abaixo do target)"
+    else:
+        return f"(❌ {tempo_atual - target:.1f}min acima do target)"
+
+def analisar_evolucao_tempo(dados_consolidados: pd.DataFrame) -> dict:
+    """
+    Analisa a evolução do tempo das ondas ao longo dos dias
+    Retorna dicionário com análise de tendência
+    """
+    if dados_consolidados.empty:
+        return {}
+    
+    try:
+        # Ordenar por data
+        df_ordenado = dados_consolidados.sort_values('data_operacao')
+        
+        # Calcular tempo médio por dia
+        df_diario = df_ordenado.groupby('data_operacao')['tempo_total_minutos'].mean().reset_index()
+        
+        if len(df_diario) < 2:
+            return {'tendencia': 'insuficiente', 'mensagem': 'Dados insuficientes para análise de tendência'}
+        
+        # Calcular tendência (primeira metade vs segunda metade)
+        meio = len(df_diario) // 2
+        primeira_metade = df_diario.iloc[:meio]['tempo_total_minutos'].mean()
+        segunda_metade = df_diario.iloc[meio:]['tempo_total_minutos'].mean()
+        
+        # Calcular variação percentual
+        if primeira_metade > 0:
+            variacao_percentual = ((segunda_metade - primeira_metade) / primeira_metade) * 100
+        else:
+            variacao_percentual = 0
+        
+        # Determinar tendência
+        if variacao_percentual < -5:
+            tendencia = 'melhorando'
+            emoji = '📈'
+            cor = 'verde'
+        elif variacao_percentual > 5:
+            tendencia = 'piorando'
+            emoji = '📉'
+            cor = 'vermelho'
+        else:
+            tendencia = 'estavel'
+            emoji = '➡️'
+            cor = 'amarelo'
+        
+        # Calcular dias para target (projeção)
+        dias_para_target = None
+        if tendencia == 'melhorando' and segunda_metade > 50:
+            # Se está melhorando mas ainda acima do target, calcular projeção
+            melhoria_diaria = (primeira_metade - segunda_metade) / meio
+            if melhoria_diaria > 0:
+                dias_para_target = max(1, int((segunda_metade - 50) / melhoria_diaria))
+        
+        return {
+            'tendencia': tendencia,
+            'emoji': emoji,
+            'cor': cor,
+            'primeira_metade': primeira_metade,
+            'segunda_metade': segunda_metade,
+            'variacao_percentual': variacao_percentual,
+            'dias_para_target': dias_para_target,
+            'mensagem': f"{emoji} Tendência: {tendencia.upper()}"
+        }
+        
+    except Exception as e:
+        return {'tendencia': 'erro', 'mensagem': f'Erro na análise: {str(e)}'} 

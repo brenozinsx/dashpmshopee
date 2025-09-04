@@ -1,180 +1,211 @@
 # 🚚 Dashboard de Controle da Expedição
 
-## Visão Geral
-
 O Dashboard de Controle da Expedição é uma nova funcionalidade adicionada ao sistema de monitoramento da operação Shopee. Ele permite monitorar e analisar os indicadores críticos de performance da expedição, identificando gargalos e oportunidades de melhoria.
 
-## 📊 Indicadores Monitorados
+## 🎯 Funcionalidades Principais
 
-### 1. ⏱️ Produtividade de Operadores por Rotas Expedidas
+### 1. **Tempo de Conferência por Operador**
 - **Objetivo:** Monitorar a produtividade de cada operador na expedição de rotas
-- **Métricas:**
-  - Quantidade de AT/TO expedidos por operador
-  - Ranking de performance baseado em produtividade (Excelente, Bom, Atenção, Crítico)
-  - Comparação entre operadores mais e menos produtivos
-  - Tempo médio de conferência como métrica secundária
+- **Métricas:** Tempo médio por AT/TO, ranking de produtividade, análise de performance
+- **Benefícios:** Identificação de operadores de alta performance e oportunidades de treinamento
 
-### 2. 🌊 Controle de Ondas - Tempo de Finalização
+### 2. **Controle de Ondas**
 - **Objetivo:** Acompanhar o tempo total para finalizar cada onda de expedição
-- **Métricas:**
-  - Tempo de finalização por onda (E-37, E-38, F-1, F-2, etc.)
-  - Sequência de ondas por dia
-  - Total de pacotes por onda
-  - Análise de sequência alfabética das ondas
+- **Métricas:** Tempo de finalização por onda, sequência de ondas por dia, análise de gargalos
+- **Benefícios:** Otimização do fluxo de trabalho e identificação de pontos de melhoria
 
-### 3. 📦 Rotas no Piso - Tempo de Retirada
-- **Objetivo:** Identificar gargalos onde rotas ficam paradas no piso
-- **Métricas:**
-  - Tempo médio que rotas ficam no piso
-  - Classificação de gargalos (Normal, Atenção, Crítico, Muito Crítico)
-  - Top 20 rotas com maior tempo no piso
-  - **Lista completa de rotas com 20+ minutos no piso**
-  - Análise de distribuição de tempo
+### 3. **Rotas no Piso**
+- **Objetivo:** Monitorar o tempo que as rotas ficam paradas no piso após conferência
+- **Métricas:** Tempo médio no piso, classificação de gargalos, top rotas com maior tempo
+- **Benefícios:** Redução de atrasos na expedição e melhoria da eficiência operacional
 
-## 📁 Formato do CSV
-
-O sistema espera um arquivo CSV com as seguintes colunas:
-
-| Coluna | Descrição | Formato | Exemplo |
-|--------|------------|---------|---------|
-| `AT/TO` | Código interno da tarefa do motorista | Texto | AT001 |
-| `Corridor Cage` | Rota do motorista (letra + número) | Texto | H-1, E-37 |
-| `Total Scanned Orders` | Total de pacotes escaneados | Número | 150 |
-| `Validation Start Time` | Início da conferência | Data/Hora | 2025-01-15 08:00:00 |
-| `Validation End Time` | Fim da conferência | Data/Hora | 2025-01-15 08:45:00 |
-| `Validation Operator` | Nome do operador | Texto | João Silva |
-| `City` | Cidade da tarefa | Texto | São Paulo |
-| `Delivering Time` | Retirada da rota pelo motorista | Data/Hora | 2025-01-15 09:30:00 |
+### 4. **📊 Expedição Consolidado (NOVA FUNCIONALIDADE)**
+- **Objetivo:** Análise histórica consolidada com indicadores de evolução e recomendações inteligentes
+- **Métricas:** Evolução temporal, performance por onda, recomendação de operadores top 6
+- **Benefícios:** Tomada de decisão baseada em dados históricos e otimização da equipe
 
 ## 🚀 Como Usar
 
-### 1. Acessar a Funcionalidade
-- No menu principal, selecione "🚚 Expedição"
-- A funcionalidade está organizada em 4 abas principais
+### Acesso ao Dashboard
+1. No menu principal, selecione "🚚 Expedição"
+2. O sistema abrirá o dashboard com 5 abas de funcionalidades
 
-### 2. Importar Dados
-- **Aba "📤 Importar CSV":**
-  - Faça upload do arquivo CSV com dados de expedição
-  - O sistema validará as colunas e processará os dados
-  - Após processamento, os dados ficam disponíveis para análise
+### Importação de Dados
+1. Na aba "📤 Importar CSV", faça upload do arquivo CSV de expedição
+2. O sistema processará automaticamente os dados
+3. **NOVO:** Use o botão "💾 Armazenar Dados no Banco" para salvar dados históricos
+4. Os dados ficarão disponíveis para análise consolidada
 
-### 3. Analisar Indicadores
-- **Aba "⏱️ Tempo Conferência":**
-  - Visualize ranking de operadores por produtividade (AT/TO expedidos)
-  - Identifique operadores com melhor e pior performance
-  - Analise gráficos de produtividade por operador
-  - Tempo de conferência como métrica complementar
+### Análise Consolidada
+1. Na aba "📊 Expedição Consolidado", visualize:
+   - **Evolução temporal** do tempo das ondas
+   - **Performance por número da onda**
+   - **Recomendações de operadores** para top 6
+   - **Indicadores de target** (50 minutos por onda)
 
-- **Aba "🌊 Controle de Ondas":**
-  - Monitore tempo de finalização de cada onda
-  - Acompanhe sequência de ondas por dia
-  - Analise volume de pacotes por onda
+## 📊 Indicadores Chave
 
-- **Aba "📦 Rotas no Piso":**
-  - Identifique gargalos de tempo no piso
-  - Visualize **Top 20 rotas** com maior tempo parado
-  - **Lista completa** de todas as rotas com 20+ minutos no piso
-  - Analise distribuição de tempo no piso
-  - **Exporte dados** para Excel para análise detalhada
+### Target Principal: 50 Minutos por Onda
+- **🟢 Excelente:** ≤ 50 minutos
+- **🟡 Atenção:** 51-70 minutos  
+- **🔴 Crítico:** > 70 minutos
 
-## 📈 Exemplos de Análise
+### Métricas de Performance
+- **Tempo médio de conferência** por operador
+- **Quantidade de AT/TO** expedidos por operador
+- **Eficiência operacional** (score 0-100)
+- **Frequência no top 6** de performance
 
-### Cenário 1: Identificação de Gargalos
-```
-Problema: Rotas ficando muito tempo no piso
-Análise: Aba "📦 Rotas no Piso" (Top 20 rotas + Lista completa 20+ min)
-Solução: Identificar operadores com maior tempo médio e implementar ações corretivas
-```
+## 🔍 Análise de Dados
 
-### Cenário 2: Otimização de Performance
-```
-Problema: Operadores com baixa produtividade (poucos AT/TO expedidos)
-Análise: Aba "⏱️ Tempo Conferência"
-Solução: Treinamento específico para operadores com baixa produtividade
-```
+### Filtros Disponíveis
+- **Período:** Seleção de datas específicas
+- **Onda:** Filtro por número ou letra da onda
+- **Operador:** Análise individual de performance
+- **Status:** Filtro por status da onda
 
-### Cenário 3: Planejamento de Ondas
-```
-Problema: Ondas demorando para finalizar
-Análise: Aba "🌊 Controle de Ondas"
-Solução: Ajustar sequência de ondas ou alocar mais recursos
-```
+### Gráficos e Visualizações
+- **Evolução temporal** do tempo das ondas
+- **Distribuição** de tempo por onda
+- **Ranking de operadores** por produtividade
+- **Análise de gargalos** no piso
 
-## 🎯 Benefícios
+## 💡 Recomendações de Operadores
 
+### Sistema de Seleção Top 6
+O sistema analisa o histórico de performance e recomenda os 6 melhores operadores para iniciar as ondas, baseado em:
+
+- **Eficiência (40%):** Combina velocidade e qualidade
+- **Frequência no Top 6 (30%):** Histórico de performance consistente
+- **Volume de Trabalho (20%):** Experiência comprovada
+- **Velocidade (10%):** Capacidade de processar rapidamente
+
+### Benefícios da Estratégia
+- ✅ **Início das ondas mais eficiente**
+- ✅ **Redução do tempo total** de expedição
+- ✅ **Maior chance de atingir** o target de 50 minutos
+- ✅ **Operadores restantes** podem fazer intervalo e retornar para ondas subsequentes
+
+## 📁 Formato do CSV
+
+O arquivo CSV deve conter as seguintes colunas:
+
+| Coluna | Descrição | Exemplo |
+|--------|-----------|---------|
+| `AT/TO` | Identificador da rota | "AT001" |
+| `Corridor Cage` | Identificação da gaiola/corredor | "A01", "B02" |
+| `Total Scanned Orders` | Total de pedidos escaneados | 150 |
+| `Validation Start Time` | Hora de início da validação | "2024-01-15 08:00:00" |
+| `Validation End Time` | Hora de fim da validação | "2024-01-15 08:45:00" |
+| `Validation Operator` | Nome do operador | "João Silva" |
+| `City` | Cidade de destino | "São Paulo" |
+| `Delivering Time` | Hora de retirada do piso | "2024-01-15 09:00:00" |
+
+## 🔄 Fluxo de Trabalho
+
+### 1. **Importação e Processamento**
+- Upload do CSV de expedição
+- Processamento automático dos dados
+- Armazenamento de dados históricos (opcional)
+
+### 2. **Análise em Tempo Real**
+- Visualização imediata dos indicadores
+- Identificação de gargalos
+- Acompanhamento de performance
+
+### 3. **Análise Consolidada**
+- Histórico de performance
+- Evolução temporal
+- Recomendações de operadores
+
+### 4. **Tomada de Decisão**
+- Seleção de operadores para top 6
+- Otimização do fluxo de trabalho
+- Ajustes operacionais baseados em dados
+
+## 📈 Benefícios Esperados
+
+### Operacionais
 1. **Visibilidade Operacional:** Acompanhamento em tempo real dos indicadores de expedição
-2. **Identificação de Gargalos:** Detecção automática de problemas operacionais
-3. **Otimização de Recursos:** Alocação eficiente de operadores e equipamentos
-4. **Melhoria Contínua:** Base de dados para implementação de melhorias
-5. **Tomada de Decisão:** Informações precisas para gestão operacional
-6. **Análise Completa:** Top 20 + Lista completa de rotas problemáticas (20+ min)
-7. **Exportação de Dados:** Geração de relatórios Excel para análise detalhada
-8. **Foco em Produtividade:** Ranking baseado em AT/TO expedidos (mais relevante)
+2. **Identificação de Gargalos:** Detecção rápida de problemas no processo
+3. **Otimização de Recursos:** Melhor alocação de operadores por performance
+4. **Redução de Tempos:** Foco no target de 50 minutos por onda
 
-## 🔍 Nova Funcionalidade: Lista Completa de Rotas 20+ Minutos
+### Estratégicos
+1. **Tomada de Decisão Baseada em Dados:** Análise histórica e tendências
+2. **Melhoria Contínua:** Identificação de oportunidades de otimização
+3. **Gestão de Performance:** Acompanhamento individual e coletivo
+4. **Planejamento Operacional:** Base para decisões de equipe e recursos
 
-### **O que é:**
-Uma tabela adicional que mostra **todas as rotas** que ficaram 20 minutos ou mais paradas no piso, complementando o Top 20.
+## 🛠️ Requisitos Técnicos
 
-### **Por que é importante:**
-- **Visão completa:** Não apenas as piores, mas todas as rotas problemáticas
-- **Análise abrangente:** Identifica padrões e tendências operacionais
-- **Planejamento:** Base para implementar melhorias em larga escala
-- **Monitoramento:** Acompanhamento de todas as rotas que precisam de atenção
+### Banco de Dados
+- **Supabase** configurado e conectado
+- **Tabelas criadas** conforme script de setup
+- **Views otimizadas** para consultas de performance
 
-### **Funcionalidades:**
-- ✅ **Filtro automático:** Mostra apenas rotas com 20+ minutos
-- ✅ **Ordenação:** Do maior para o menor tempo no piso
-- ✅ **Métricas resumidas:** Total de rotas, tempo médio, pacotes afetados
-- ✅ **Exportação Excel:** Gera relatório completo para análise externa
-- ✅ **Formatação inteligente:** Tempos convertidos para horas quando apropriado
+### Dependências
+- **Streamlit** para interface web
+- **Pandas** para processamento de dados
+- **Plotly** para visualizações gráficas
+- **Supabase** para armazenamento de dados
 
-## 🔧 Configurações
+## 🔧 Configuração
 
-- **Filtros:** Aplicar filtros por data, operador, cidade
-- **Exportação:** Exportar dados para Excel
-- **Gráficos:** Visualizações interativas com Plotly
-- **Responsivo:** Interface adaptável para diferentes dispositivos
-- **Formatação de Tempo:** Conversão automática de minutos para horas quando > 59 minutos
+### 1. **Setup do Banco**
+```sql
+-- Executar o script setup_database.sql
+-- Criará as tabelas e views necessárias
+```
 
-## ⏰ Formatação Inteligente de Tempo
+### 2. **Variáveis de Ambiente**
+```env
+SUPABASE_URL=sua_url_do_supabase
+SUPABASE_KEY=sua_chave_do_supabase
+```
 
-O sistema automaticamente converte tempos para o formato mais legível:
+### 3. **Instalação de Dependências**
+```bash
+pip install -r requirements.txt
+```
 
-- **Até 59 minutos:** Exibido como "45.2 min"
-- **60 minutos ou mais:** Exibido como "1h 30min" ou "2h" (quando não há minutos restantes)
+## 📊 Exemplos de Uso
 
-**Exemplos:**
-- 45.2 minutos → "45.2 min"
-- 88.4 minutos → "1h 28min"
-- 120.0 minutos → "2h"
-- 90.5 minutos → "1h 30min"
+### Cenário 1: Análise Diária
+1. Importar CSV do dia
+2. Verificar tempo das ondas
+3. Identificar gargalos
+4. Ajustar alocação de operadores
 
-Esta formatação é aplicada automaticamente em todos os indicadores de tempo:
-- Tempo médio de conferência (métrica secundária no ranking de produtividade)
-- Tempo de finalização de ondas
-- Tempo de rotas no piso
-- Métricas de percentis
-- Rankings e tabelas
+### Cenário 2: Análise Semanal
+1. Usar dados consolidados
+2. Analisar evolução temporal
+3. Identificar tendências
+4. Planejar melhorias
 
-## 📱 Interface
+### Cenário 3: Seleção de Equipe
+1. Consultar recomendações de top 6
+2. Selecionar operadores baseado em performance
+3. Alocar equipe para ondas
+4. Monitorar resultados
 
-A interface é intuitiva e organizada em abas:
-- **Design responsivo** para desktop e mobile
-- **Cores consistentes** com a identidade visual da Shopee
-- **Gráficos interativos** para melhor análise
-- **Métricas em tempo real** para acompanhamento contínuo
+## 🎯 Próximos Passos
 
-## 🆘 Suporte
+### Funcionalidades Planejadas
+- [ ] **Alertas automáticos** para ondas acima do target
+- [ ] **Dashboard executivo** com KPIs consolidados
+- [ ] **Relatórios automáticos** por email
+- [ **Integração com sistemas** de gestão de equipe
+- [ ] **Análise preditiva** de performance
 
-Para dúvidas ou problemas:
-1. Verifique o formato do CSV
-2. Confirme se todas as colunas estão presentes
-3. Valide os formatos de data/hora
-4. Consulte o template de exemplo fornecido
+### Melhorias Contínuas
+- Otimização de queries de banco
+- Novos tipos de visualizações
+- Métricas adicionais de performance
+- Interface mais intuitiva
 
 ---
 
 **Desenvolvido para:** Operação Logística Shopee  
-**Versão:** 1.0  
-**Última atualização:** Janeiro 2025
+**Versão:** 2.0 (com Expedição Consolidado)  
+**Última atualização:** Janeiro 2024

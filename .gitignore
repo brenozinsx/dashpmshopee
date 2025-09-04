@@ -153,6 +153,7 @@ temp/
 tmp/
 
 # Supabase
+.env
 .env.local
 .env.production
 

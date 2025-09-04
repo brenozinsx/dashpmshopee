@@ -656,5 +656,242 @@ class DatabaseManager:
             st.error(f"❌ Erro ao obter total de flutuantes: {e}")
             return 0
 
+    # ============================================================================
+    # FUNÇÕES PARA EXPEDIÇÃO CONSOLIDADO
+    # ============================================================================
+
+    def salvar_expedicao_consolidado(self, dados_ondas: List[Dict], dados_operadores: List[Dict], arquivo_origem: str) -> bool:
+        """Salva dados consolidados de expedição no banco"""
+        if not self.is_connected():
+            st.warning("⚠️ Supabase não conectado - salvando apenas localmente")
+            return False
+        
+        try:
+            st.info(f"🔄 Salvando dados consolidados de expedição...")
+            st.info(f"  - Ondas: {len(dados_ondas)}")
+            st.info(f"  - Operadores: {len(dados_operadores)}")
+            
+            # Salvar dados das ondas
+            if dados_ondas:
+                st.info("📊 Salvando dados das ondas...")
+                for i, onda in enumerate(dados_ondas):
+                    st.info(f"  Inserindo onda {i+1}/{len(dados_ondas)}: {onda.get('data_operacao', 'N/A')} - Onda {onda.get('numero_onda', 'N/A')}")
+                    
+                    # Converter tipos antes de inserir no Supabase
+                    onda_convertida = self._converter_tipos_python(onda)
+                    
+                    # Inserir no Supabase
+                    response = self.supabase.table('expedicao_consolidado').insert(onda_convertida).execute()
+                    
+                    if not response.data:
+                        st.error(f"❌ Falha ao inserir onda {i+1}")
+                        return False
+            
+            # Salvar dados dos operadores
+            if dados_operadores:
+                st.info("👥 Salvando dados dos operadores...")
+                for i, operador in enumerate(dados_operadores):
+                    st.info(f"  Inserindo operador {i+1}/{len(dados_operadores)}: {operador.get('operador', 'N/A')}")
+                    
+                    # Converter tipos antes de inserir no Supabase
+                    operador_convertido = self._converter_tipos_python(operador)
+                    
+                    # Inserir no Supabase
+                    response = self.supabase.table('expedicao_operadores_historico').insert(operador_convertido).execute()
+                    
+                    if not response.data:
+                        st.error(f"❌ Falha ao inserir operador {i+1}")
+                        return False
+            
+            st.success(f"✅ Dados consolidados salvos com sucesso no Supabase!")
+            return True
+            
+        except Exception as e:
+            st.error(f"❌ Erro ao salvar dados consolidados: {e}")
+            return False
+
+    def carregar_expedicao_consolidado(self, data_inicio: str = None, data_fim: str = None, limit: int = 1000) -> pd.DataFrame:
+        """Carrega dados consolidados de expedição"""
+        if not self.is_connected():
+            return pd.DataFrame()
+        
+        try:
+            query = self.supabase.table('expedicao_consolidado').select('*')
+            
+            if data_inicio:
+                query = query.gte('data_operacao', data_inicio)
+            if data_fim:
+                query = query.lte('data_operacao', data_fim)
+            
+            response = query.order('data_operacao', desc=True).limit(limit).execute()
+            
+            if response.data:
+                return pd.DataFrame(response.data)
+            else:
+                return pd.DataFrame()
+                
+        except Exception as e:
+            st.error(f"❌ Erro ao carregar dados consolidados: {e}")
+            return pd.DataFrame()
+
+    def carregar_historico_operadores_expedicao(self, data_inicio: str = None, data_fim: str = None, limit: int = 1000) -> pd.DataFrame:
+        """Carrega histórico de operadores na expedição"""
+        if not self.is_connected():
+            return pd.DataFrame()
+        
+        try:
+            query = self.supabase.table('expedicao_operadores_historico').select('*')
+            
+            if data_inicio:
+                query = query.gte('data_operacao', data_inicio)
+            if data_fim:
+                query = query.lte('data_operacao', data_fim)
+            
+            response = query.order('data_operacao', desc=True).limit(limit).execute()
+            
+            if response.data:
+                return pd.DataFrame(response.data)
+            else:
+                return pd.DataFrame()
+                
+        except Exception as e:
+            st.error(f"❌ Erro ao carregar histórico de operadores: {e}")
+            return pd.DataFrame()
+
+    def obter_resumo_expedicao_diario(self, data_inicio: str = None, data_fim: str = None) -> pd.DataFrame:
+        """Obtém resumo diário de expedição usando a view"""
+        if not self.is_connected():
+            return pd.DataFrame()
+        
+        try:
+            query = self.supabase.from_('resumo_expedicao_diario').select('*')
+            
+            if data_inicio:
+                query = query.gte('data_operacao', data_inicio)
+            if data_fim:
+                query = query.lte('data_operacao', data_fim)
+            
+            response = query.order('data_operacao', desc=True).execute()
+            
+            if response.data:
+                return pd.DataFrame(response.data)
+            else:
+                return pd.DataFrame()
+                
+        except Exception as e:
+            st.error(f"❌ Erro ao obter resumo diário: {e}")
+            return pd.DataFrame()
+
+    def obter_ranking_expedicao_operadores(self) -> pd.DataFrame:
+        """Obtém ranking de operadores na expedição usando a view"""
+        if not self.is_connected():
+            return pd.DataFrame()
+        
+        try:
+            response = self.supabase.from_('ranking_expedicao_operadores').select('*').execute()
+            
+            if response.data:
+                return pd.DataFrame(response.data)
+            else:
+                return pd.DataFrame()
+                
+        except Exception as e:
+            st.error(f"❌ Erro ao obter ranking de operadores: {e}")
+            return pd.DataFrame()
+
+    def obter_resumo_expedicao_semanal(self, ano: int = None) -> pd.DataFrame:
+        """Obtém resumo semanal de expedição usando a view"""
+        if not self.is_connected():
+            return pd.DataFrame()
+        
+        try:
+            query = self.supabase.from_('resumo_expedicao_semanal').select('*')
+            
+            if ano:
+                query = query.eq('ano', ano)
+            
+            response = query.order('ano', desc=True).order('semana_ano', desc=True).execute()
+            
+            if response.data:
+                return pd.DataFrame(response.data)
+            else:
+                return pd.DataFrame()
+                
+        except Exception as e:
+            st.error(f"❌ Erro ao obter resumo semanal: {e}")
+            return pd.DataFrame()
+
+    def obter_resumo_expedicao_mensal(self, ano: int = None) -> pd.DataFrame:
+        """Obtém resumo mensal de expedição usando a view"""
+        if not self.is_connected():
+            return pd.DataFrame()
+        
+        try:
+            query = self.supabase.from_('resumo_expedicao_mensal').select('*')
+            
+            if ano:
+                query = query.eq('ano', ano)
+            
+            response = query.order('ano', desc=True).order('mes', desc=True).execute()
+            
+            if response.data:
+                return pd.DataFrame(response.data)
+            else:
+                return pd.DataFrame()
+                
+        except Exception as e:
+            st.error(f"❌ Erro ao obter resumo mensal: {e}")
+            return pd.DataFrame()
+
+    def _converter_tipos_python(self, dados):
+        """
+        Converte tipos numpy/pandas para tipos Python nativos para evitar problemas de serialização JSON
+        """
+        if isinstance(dados, dict):
+            return {chave: self._converter_tipos_python(valor) for chave, valor in dados.items()}
+        elif isinstance(dados, list):
+            return [self._converter_tipos_python(item) for item in dados]
+        elif hasattr(dados, 'item'):  # numpy types
+            return dados.item()
+        elif hasattr(dados, 'dtype'):  # pandas types
+            import pandas as pd
+            if pd.isna(dados):
+                return None
+            return dados.item() if hasattr(dados, 'item') else dados
+        elif hasattr(dados, '__class__') and dados.__class__.__module__ == 'numpy':
+            return dados.item()
+        elif isinstance(dados, (int, float, str, bool, type(None))):
+            return dados
+        else:
+            return str(dados)
+
+    def obter_estatisticas_expedicao_consolidado(self) -> Dict:
+        """Obtém estatísticas gerais da expedição consolidado"""
+        if not self.is_connected():
+            return {}
+        
+        try:
+            # Total de registros
+            response_total = self.supabase.table('expedicao_consolidado').select('*', count='exact').execute()
+            total_ondas = response_total.count if hasattr(response_total, 'count') else 0
+            
+            # Total de operadores
+            response_operadores = self.supabase.table('expedicao_operadores_historico').select('*', count='exact').execute()
+            total_operadores = response_operadores.count if hasattr(response_operadores, 'count') else 0
+            
+            # Datas disponíveis
+            response_datas = self.supabase.table('expedicao_consolidado').select('data_operacao').execute()
+            datas_unicas = len(set([r['data_operacao'] for r in response_datas.data])) if response_datas.data else 0
+            
+            return {
+                'total_ondas': total_ondas,
+                'total_operadores': total_operadores,
+                'datas_unicas': datas_unicas
+            }
+            
+        except Exception as e:
+            st.error(f"❌ Erro ao obter estatísticas: {e}")
+            return {}
+
 # Instância global do gerenciador de banco
 db_manager = DatabaseManager() 
